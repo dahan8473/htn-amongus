@@ -122,6 +122,7 @@ static void applyPhase(GPhase p, int durSecs) {
   needRedraw = true;
   lastCd = -1;
   if (p == G_VOTING) { voteSel = 0; myVoted = false; }
+  if (p == G_LOBBY) unlockColorAssignments();
   if (prev == G_LOBBY && p == G_PLAYING) { resetTasks(); taskDone = 0; }  // new game
   if (p != G_PLAYING && taskActive()) taskCancel();  // a meeting interrupts a task
 }
@@ -151,9 +152,27 @@ static void broadcastCfg() {
   broadcastMessage(m);
 }
 
+static bool broadcastUniqueColors() {
+  if (!assignUniqueColors()) return false;
+  lockColorAssignments();
+  char m[128];
+  int off = snprintf(m, sizeof(m), "COL:");
+  for (int i = 0; i < rosterCount() && off < (int)sizeof(m); i++) {
+    off += snprintf(m + off, sizeof(m) - off, "%s=%d%s",
+                    rosterId(i), rosterColorIndex(i),
+                    i + 1 < rosterCount() ? "," : "");
+  }
+  broadcastMessage(m);
+  return true;
+}
+
 // ---------- host actions ----------
 static void hostStartGame() {
   isHost = true;
+  if (!broadcastUniqueColors()) {
+    Serial.println("Not enough colors for all players");
+    return;
+  }
   resetPlayerStates();
   int n = rosterCount();
   int nImp = cfgImp; if (nImp >= n) nImp = 1; if (nImp < 1) nImp = 1;
@@ -189,6 +208,9 @@ static void hostStartGame() {
       if (role == ROLE_IMP) storeImpTeam(impCsv);
     }
   }
+  // Repeat the map after role packets so a badge that missed the first mesh
+  // packet still receives the authoritative color assignment.
+  broadcastUniqueColors();
   broadcastCfg();
   broadcastAlive();
   // crew task pool: each crewmate must finish TASKS_TO_WIN of the NUM_TASKS minigames
@@ -316,8 +338,49 @@ static void hostTaskDone(const char *id) {
 }
 
 // ---------- message handling (all badges) ----------
+static bool applyColorMap(const char *spec) {
+  struct Assignment { char id[ID_LEN]; int color; };
+  Assignment assignments[MAX_PLAYERS];
+  bool used[MAX_PLAYERS] = { false };
+  int count = 0;
+  char buf[128];
+  strncpy(buf, spec, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  char *token = strtok(buf, ",");
+  while (token) {
+    if (count >= MAX_PLAYERS) return false;
+    int color;
+    if (sscanf(token, "%4[^=]=%d", assignments[count].id, &color) != 2 ||
+        color < 0 || color >= colorCount() || used[color]) return false;
+    for (int i = 0; i < count; i++)
+      if (strcmp(assignments[i].id, assignments[count].id) == 0) return false;
+    assignments[count].color = color;
+    used[color] = true;
+    count++;
+    token = strtok(NULL, ",");
+  }
+  if (count == 0) return false;
+
+  // A partial map must never lock in. The host's map may also contain IDs
+  // this badge has not heard yet; setColorId() adds those entries safely.
+  for (int i = 0; i < rosterCount(); i++) {
+    bool found = false;
+    for (int j = 0; j < count; j++) {
+      if (strcmp(rosterId(i), assignments[j].id) == 0) { found = true; break; }
+    }
+    if (!found) return false;
+  }
+  for (int i = 0; i < count; i++)
+    if (!setColorId(assignments[i].id, assignments[i].color)) return false;
+  lockColorAssignments();
+  return true;
+}
+
 void gameHandleMessage(const char *msg) {
-  if (strncmp(msg, "ROLE:", 5) == 0) {
+  if (strncmp(msg, "COL:", 4) == 0) {
+    if (applyColorMap(msg + 4)) needRedraw = true;
+  } else if (strncmp(msg, "ROLE:", 5) == 0) {
     char id[ID_LEN]; char c; char csv[128] = { 0 };
     int got = sscanf(msg, "ROLE:%4[^:]:%c:%127s", id, &c, csv);
     if (got >= 2) {

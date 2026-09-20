@@ -23,6 +23,7 @@ static const int NCOLORS = sizeof(COLORS) / sizeof(COLORS[0]);
 
 static char s_myId[ID_LEN];
 static int s_myColor = 0;
+static bool colorAssignmentsLocked = false;
 
 struct RosterEntry {
   char id[ID_LEN];
@@ -60,11 +61,13 @@ void sendPresence() {
 void notePresence(const char *id, int colorIdx) {
   for (int i = 0; i < nRoster; i++) {
     if (strncmp(roster[i].id, id, ID_LEN) == 0) {
-      roster[i].colorIdx = colorIdx;
       roster[i].lastSeen = millis();
+      if (!colorAssignmentsLocked) assignUniqueColors();
       return;
     }
   }
+  // After the host locks a game, only IDs in its complete color map may join.
+  if (colorAssignmentsLocked) return;
   if (nRoster < MAX_PLAYERS) {
     strncpy(roster[nRoster].id, id, ID_LEN);
     roster[nRoster].id[ID_LEN - 1] = '\0';
@@ -75,8 +78,88 @@ void notePresence(const char *id, int colorIdx) {
     roster[nRoster].immortal = false;
     roster[nRoster].lastSeen = millis();
     nRoster++;
+    assignUniqueColors();
   }
 }
+
+static int preferredColorForId(const char *id) {
+  unsigned int value = 0;
+  for (int i = 0; i < ID_LEN - 1 && id[i]; i++) {
+    value <<= 4;
+    if (id[i] >= '0' && id[i] <= '9') value |= id[i] - '0';
+    else if (id[i] >= 'A' && id[i] <= 'F') value |= id[i] - 'A' + 10;
+    else if (id[i] >= 'a' && id[i] <= 'f') value |= id[i] - 'a' + 10;
+  }
+  return value % NCOLORS;
+}
+
+static int takeColor(int *bank, int *bankSize, int preferred) {
+  int index = -1;
+  for (int i = 0; i < *bankSize; i++) {
+    if (bank[i] == preferred) { index = i; break; }
+  }
+  if (index < 0) index = 0;
+  if (*bankSize <= 0) return -1;
+  int chosen = bank[index];
+  for (int i = index; i + 1 < *bankSize; i++) bank[i] = bank[i + 1];
+  (*bankSize)--;
+  return chosen;
+}
+
+bool setColorId(const char *id, int colorIdx) {
+  if (!id || colorIdx < 0 || colorIdx >= NCOLORS) return false;
+  for (int i = 0; i < nRoster; i++) {
+    if (strncmp(roster[i].id, id, ID_LEN) == 0) {
+      roster[i].colorIdx = colorIdx;
+      roster[i].lastSeen = millis();
+      if (strcmp(id, s_myId) == 0) s_myColor = colorIdx;
+      return true;
+    }
+  }
+  if (nRoster >= MAX_PLAYERS) return false;
+  strncpy(roster[nRoster].id, id, ID_LEN);
+  roster[nRoster].id[ID_LEN - 1] = '\0';
+  roster[nRoster].colorIdx = colorIdx;
+  roster[nRoster].alive = true;
+  roster[nRoster].role = ROLE_NONE;
+  roster[nRoster].meetings = 0;
+  roster[nRoster].immortal = false;
+  roster[nRoster].lastSeen = millis();
+  if (strcmp(id, s_myId) == 0) s_myColor = colorIdx;
+  nRoster++;
+  return true;
+}
+
+bool assignUniqueColors() {
+  if (nRoster > NCOLORS) return false;
+  int bank[NCOLORS];
+  int bankSize = NCOLORS;
+  for (int i = 0; i < NCOLORS; i++) bank[i] = i;
+
+  // Sort by stable badge ID so every badge produces the same map even if
+  // presence packets arrived in a different order.
+  int order[MAX_PLAYERS];
+  for (int i = 0; i < nRoster; i++) order[i] = i;
+  for (int i = 0; i < nRoster; i++) {
+    for (int j = i + 1; j < nRoster; j++) {
+      if (strcmp(roster[order[j]].id, roster[order[i]].id) < 0) {
+        int tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+      }
+    }
+  }
+
+  for (int p = 0; p < nRoster; p++) {
+    int i = order[p];
+    int chosen = takeColor(bank, &bankSize, preferredColorForId(roster[i].id));
+    if (chosen < 0) return false;
+    roster[i].colorIdx = chosen;
+    if (strcmp(roster[i].id, s_myId) == 0) s_myColor = chosen;
+  }
+  return true;
+}
+
+void lockColorAssignments() { colorAssignmentsLocked = true; }
+void unlockColorAssignments() { colorAssignmentsLocked = false; }
 
 int rosterCount() { return nRoster; }
 const char *rosterId(int i) { return roster[i].id; }
