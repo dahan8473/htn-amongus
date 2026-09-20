@@ -24,11 +24,16 @@ static bool isHost = false;
 static unsigned long phaseEnd = 0;      // for timed phases (discuss/voting)
 static int myRole = ROLE_NONE;
 
-// hold START to peek your role card; a quick tap calls a meeting
+// hold START to peek your role card
 static unsigned long startDownAt = 0;
 static bool startPrevHeld = false;
 static bool startIsReveal = false;
 static bool revealActive = false;
+
+// HOME: quick tap calls a meeting; hold shows the dev debug screen
+static unsigned long homeDownAt = 0;
+static bool homePrevHeld = false;
+static bool homeIsHold = false;
 
 static int voteSel = 0;
 static bool myVoted = false;
@@ -250,9 +255,8 @@ static void playingInput() {
   if (held && !startIsReveal && millis() - startDownAt > 350) {
     startIsReveal = true; needRedraw = true;      // entered reveal
   }
-  if (startPrevHeld && !held) {                    // released
-    if (!startIsReveal) callMeeting();             // it was a quick tap
-    startIsReveal = false; needRedraw = true;      // leaving reveal -> redraw HUD
+  if (startPrevHeld && !held) {                    // released reveal
+    startIsReveal = false; needRedraw = true;      // redraw HUD
   }
   startPrevHeld = held;
   revealActive = startIsReveal && held;
@@ -297,13 +301,21 @@ void setupGame() {
 }
 
 void gameUpdate() {
-  // hidden dev screen: hold HOME to see tilt + NFC readouts
-  if (isButtonHeld(BTN_HOME)) {
+  // HOME: quick tap = emergency meeting; hold = dev debug screen.
+  bool homeHeld = isButtonHeld(BTN_HOME);
+  if (isButtonPressed(BTN_HOME)) { homeDownAt = millis(); homeIsHold = false; }
+  if (homeHeld && !homeIsHold && millis() - homeDownAt > 350) homeIsHold = true;
+  bool homeTapped = false;
+  if (homePrevHeld && !homeHeld) { if (!homeIsHold) homeTapped = true; }
+  homePrevHeld = homeHeld;
+
+  if (homeHeld && homeIsHold) {           // hold HOME -> debug readouts
     float x = 0, y = 0; getRollPitch(x, y);
     updateDisplay(x, y, false);
     needRedraw = true;
     return;
   }
+  if (homeTapped && phase == G_PLAYING) callMeeting();  // tap HOME -> meeting
 
   // ---- input ----
   switch (phase) {

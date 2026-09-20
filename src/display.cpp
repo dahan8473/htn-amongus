@@ -205,7 +205,7 @@ void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB) {
   tft.print(b);
   tft.setTextColor(tft.color565(150, 150, 170), C_NAVY);
   tft.setCursor(14, 200);
-  tft.print("tap START=meeting");
+  tft.print("tap HOME=meeting");
   tft.setCursor(14, 220);
   tft.print("hold START=role");
 }
