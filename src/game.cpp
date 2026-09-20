@@ -92,6 +92,7 @@ static int lastCd = -1;
 static int lastLobbyPlayers = -1;
 static bool bodyNearby = false;  // drives the "hold B to report" HUD hint
 static int lastKillCdShown = -1; // drives the role-card cooldown redraw tick
+static unsigned long lastAskMs = 0; // retry cadence for a missed role assignment
 
 // crew task progress (host authoritative, broadcast via PROG)
 static int taskDone = 0, taskTotal = 0;
@@ -316,6 +317,28 @@ static void hostReport(const char *reporter) {
   setPhaseHost(G_GATHER, 0);
 }
 
+// A badge whose presence hadn't reached us yet when hostStartGame() dealt
+// roles never got one, and role assignment only ever happens once -- so
+// without this, that badge is stuck at ROLE_NONE for the whole round. Any
+// badge in that state keeps asking (see gameUpdate()) until the host, which
+// by then has very likely learned about it via ordinary presence beacons,
+// can fold it in. Late arrivals always join as crew: the impostor draw
+// already happened, and re-drawing mid-round would be unfair/confusing.
+static void hostAssignLate(const char *id) {
+  if (phase != G_PLAYING) return;
+  int i = rosterIndexOfId(id);
+  if (i < 0) return;                    // still don't know this badge at all
+  if (roleIdx(i) != ROLE_NONE) return;  // already has a role -- nothing to do
+  setRoleId(id, ROLE_CREW);
+  setAliveId(id, true);
+  taskTotal += TASKS_TO_WIN;
+  char m[24]; snprintf(m, sizeof(m), "ROLE:%s:C", id);
+  broadcastMessage(m);
+  broadcastAlive();
+  char pm[24]; snprintf(pm, sizeof(pm), "PROG:%d:%d", taskDone, taskTotal);
+  broadcastMessage(pm);
+}
+
 // a crewmate finished a task. Only living crew get credit, and only up to
 // TASKS_TO_WIN each -- capped per player so one badge replaying extra
 // minigames (or a stray duplicate message) can't inflate the shared bar
@@ -432,6 +455,8 @@ void gameHandleMessage(const char *msg) {
     hostReport(msg + 4);
   } else if (isHost && strncmp(msg, "TDONE:", 6) == 0) {
     hostTaskDone(msg + 6);
+  } else if (isHost && strncmp(msg, "ASK:", 4) == 0) {
+    hostAssignLate(msg + 4);
   } else if (isHost && strncmp(msg, "RM:", 3) == 0) {
     if (phase == G_PLAYING) {
       const char *id = msg + 3;
@@ -604,6 +629,15 @@ void gameOnNfc(const char *uid) {
 }
 
 void gameUpdate() {
+  // Self-heal a missed role deal: if we're mid-round but never got a role
+  // (our presence hadn't reached the host when it dealt roles), keep asking
+  // until it can fold us in -- see hostAssignLate().
+  if (!isHost && phase == G_PLAYING && myRole == ROLE_NONE && millis() - lastAskMs > 2000) {
+    lastAskMs = millis();
+    char m[12]; snprintf(m, sizeof(m), "ASK:%s", myId());
+    broadcastMessage(m);
+  }
+
   // HOME: quick tap = emergency meeting; hold = dev debug screen.
   bool homeHeld = isButtonHeld(BTN_HOME);
   if (isButtonPressed(BTN_HOME)) { homeDownAt = millis(); homeIsHold = false; }
