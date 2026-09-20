@@ -10,9 +10,13 @@
 #include "players.h"
 #include "game.h"
 #include "espnow_prox.h"
+#include "tasks.h"
+#include "tasktest.h"
 
 unsigned long lastPresence = 0;
 unsigned long lastProxDebug = 0;
+bool nfcEnabled = false;
+bool testMode = false;   // solo task-test harness (hold A at boot)
 bool immortal = false;
 
 void setup() {
@@ -23,11 +27,23 @@ void setup() {
   setupEspNowRadio();
   setupBroadcast();
   setupButtons();
-  setupPlayers();
-  setupGame();
-  setupProximity(myId());  // ESP-NOW ranging for kills / body reports
 
-  powerDownNFC();  // NFC reader stays off; AUX1 is repurposed for demo immortality
+  // Hold A while booting -> solo task test mode; skip game/roster/proximity.
+  // (Not START: START is GPIO9, the boot strapping pin -- holding it at reset
+  //  drops the chip into download mode instead of running firmware.)
+  for (int i = 0; i < 6; i++) { updateButtons(); delay(12); }
+  testMode = isButtonHeld(BTN_A);
+
+  if (!testMode) {
+    setupPlayers();
+    setupGame();
+    setupProximity(myId());  // ESP-NOW ranging for kills / body reports
+  } else {
+    Serial.println("== TASK TEST MODE (hold A at boot to enter) ==");
+  }
+
+  setupTasks();
+  powerDownNFC();  // NFC starts off to save power
 
   if (!setupIMU()) {
     Serial.println("SC7A20 IMU not found at 0x19!");
@@ -38,6 +54,9 @@ void loop() {
   updateLEDs();
   updateButtons();
   updateBroadcast();  // fires any due mesh relays
+
+  // solo test harness owns everything when active
+  if (testMode) { taskTestLoop(); return; }
 
   // announce ourselves ~1/sec so every badge builds the same roster
   if (millis() - lastPresence > 1000) {
@@ -53,6 +72,20 @@ void loop() {
       if (sscanf(msg, "ID:%4[^:]:%d", id, &col) == 2) notePresence(id, col);
     } else {
       gameHandleMessage(msg);
+    }
+  }
+
+  // NFC on during play AND lobby (lobby lets a single badge test tasks)
+  bool wantNfc = (gamePhase() == G_PLAYING || gamePhase() == G_LOBBY);
+  if (wantNfc != nfcEnabled) {
+    nfcEnabled = wantNfc;
+    if (nfcEnabled) beginNFCScan(); else powerDownNFC();
+  }
+  if (nfcEnabled) {
+    String uid = scanNFC();
+    if (uid != "") {
+      Serial.print("Scanned tag UID: "); Serial.println(uid);
+      gameOnNfc(uid.c_str());
     }
   }
 

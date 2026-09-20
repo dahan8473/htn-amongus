@@ -253,6 +253,25 @@ void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB,
   tft.print("hold START=role");
 }
 
+uint16_t gfxColor(uint8_t r, uint8_t g, uint8_t b) { return tft.color565(r, g, b); }
+void gfxClear(uint16_t color) { tft.fillScreen(color); }
+void gfxText(int x, int y, int size, uint16_t color, const char *s) {
+  tft.setTextColor(color); tft.setTextSize(size); tft.setCursor(x, y); tft.print(s);
+}
+void gfxRectOutline(int x, int y, int w, int h, uint16_t color) { tft.drawRect(x, y, w, h, color); }
+void gfxFillRect(int x, int y, int w, int h, uint16_t color) { tft.fillRect(x, y, w, h, color); }
+void gfxFillCircle(int x, int y, int r, uint16_t color) { tft.fillCircle(x, y, r, color); }
+void gfxFillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t color) {
+  tft.fillTriangle(x0, y0, x1, y1, x2, y2, color);
+}
+
+void drawTaskBar(int pct) {
+  if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+  int w = 300, x = 10, y = 6, h = 12;
+  tft.drawRect(x, y, w, h, ST77XX_WHITE);
+  tft.fillRect(x + 1, y + 1, (w - 2) * pct / 100, h - 2, tft.color565(70, 210, 90));
+}
+
 void showGameOver(bool crewWon) {
   tft.fillScreen(crewWon ? tft.color565(0, 20, 45) : tft.color565(0, 35, 15));
   tft.setTextColor(crewWon ? tft.color565(70, 160, 240) : tft.color565(70, 220, 110));
