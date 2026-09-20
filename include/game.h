@@ -18,4 +18,5 @@ enum GPhase {
 void setupGame();
 void gameHandleMessage(const char *msg);  // apply host messages / act on requests
 void gameUpdate();                         // per-loop: input, timers, rendering
+void gameOnNfc(const char *uid);           // an NFC tag was scanned -> start its task
 GPhase gamePhase();
