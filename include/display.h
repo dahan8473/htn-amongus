@@ -20,9 +20,9 @@ void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor);
 void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
                int colorR, int colorG, int colorB);
 
-// In-game status: your crewmate, alive count, role hint (or GHOST if dead).
-void showHUD(bool alive, bool isImpostor, int aliveCount,
-             int colorR, int colorG, int colorB);
+// In-game status: your crewmate + color, alive count (or GHOST if dead).
+// Role is NOT shown here -- hold START to see it.
+void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB);
 
 // Voting screen: the current pick (a color, or SKIP), countdown, and hints.
 void showVote(const char *name, int colorR, int colorG, int colorB,

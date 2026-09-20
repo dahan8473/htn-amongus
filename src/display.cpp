@@ -179,8 +179,7 @@ void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
   tft.print("START = play");
 }
 
-void showHUD(bool alive, bool isImpostor, int aliveCount,
-             int colorR, int colorG, int colorB) {
+void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB) {
   tft.fillScreen(C_NAVY);
   if (!alive) {
     drawCrewmate(80, 120, tft.color565(70, 70, 80));  // grey ghost
@@ -194,18 +193,21 @@ void showHUD(bool alive, bool isImpostor, int aliveCount,
     return;
   }
   drawCrewmate(70, 120, tft.color565(colorR, colorG, colorB));
-  tft.setTextColor(isImpostor ? C_RED : tft.color565(60, 140, 230));
+  // show only the player's color, never the secret role
+  tft.setTextColor(tft.color565(colorR, colorG, colorB), C_NAVY);
   tft.setTextSize(3);
-  tft.setCursor(150, 60);
-  tft.print(isImpostor ? "IMPOSTOR" : "CREW");
+  tft.setCursor(150, 70);
+  tft.print("YOU");
   tft.setTextColor(tft.color565(190, 190, 210), C_NAVY);
   tft.setTextSize(2);
   char b[20]; snprintf(b, sizeof(b), "Alive: %d ", aliveCount);
-  tft.setCursor(150, 110);
+  tft.setCursor(150, 115);
   tft.print(b);
   tft.setTextColor(tft.color565(150, 150, 170), C_NAVY);
-  tft.setCursor(20, 205);
-  tft.print("START=meeting  A=role");
+  tft.setCursor(14, 200);
+  tft.print("tap START=meeting");
+  tft.setCursor(14, 220);
+  tft.print("hold START=role");
 }
 
 void showGameOver(bool crewWon) {

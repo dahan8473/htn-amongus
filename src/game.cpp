@@ -24,8 +24,11 @@ static bool isHost = false;
 static unsigned long phaseEnd = 0;      // for timed phases (discuss/voting)
 static int myRole = ROLE_NONE;
 
-static unsigned long revealUntil = 0;   // role-card overlay
-static bool revealDrawn = false;
+// hold START to peek your role card; a quick tap calls a meeting
+static unsigned long startDownAt = 0;
+static bool startPrevHeld = false;
+static bool startIsReveal = false;
+static bool revealActive = false;
 
 static int voteSel = 0;
 static bool myVoted = false;
@@ -140,9 +143,9 @@ static void hostTallyAndEject() {
   if (ejSkipped) snprintf(m, sizeof(m), "EJ:NONE");
   else snprintf(m, sizeof(m), "EJ:%s:%c", ejId, ejWasImp ? 'I' : 'C');
   broadcastMessage(m);
-  applyPhase(G_RESULT, 0);
-  phaseEnd = millis() + RESULT_MS;
-  setPhaseHost(G_RESULT, 0);  // followers also enter result; ej info from EJ
+  // show the result for RESULT_MS on every badge (dur must be non-zero so the
+  // phase timer isn't reset to "already expired")
+  setPhaseHost(G_RESULT, RESULT_MS / 1000);
 }
 
 static void hostCheckWinOrResume() {
@@ -231,16 +234,28 @@ static void lobbyInput() {
   if (isButtonPressed(BTN_START)) hostStartGame();
 }
 
-static void playingInput() {
-  if (isButtonPressed(BTN_START)) {           // request a meeting
-    if (isHost) {
-      int i = rosterIndexOfId(myId());
-      if (i >= 0 && aliveIdx(i) && meetingsIdx(i) < cfgMeet) { incMeetingsId(myId()); setPhaseHost(G_GATHER, 0); }
-    } else {
-      char m[12]; snprintf(m, sizeof(m), "RM:%s", myId()); req(m);
-    }
+static void callMeeting() {
+  if (isHost) {
+    int i = rosterIndexOfId(myId());
+    if (i >= 0 && aliveIdx(i) && meetingsIdx(i) < cfgMeet) { incMeetingsId(myId()); setPhaseHost(G_GATHER, 0); }
+  } else {
+    char m[12]; snprintf(m, sizeof(m), "RM:%s", myId()); req(m);
   }
-  if (isButtonPressed(BTN_A)) { revealUntil = millis() + REVEAL_MS; revealDrawn = false; }
+}
+
+static void playingInput() {
+  // START: hold to reveal your role card, quick tap to call a meeting.
+  bool held = isButtonHeld(BTN_START);
+  if (isButtonPressed(BTN_START)) { startDownAt = millis(); startIsReveal = false; }
+  if (held && !startIsReveal && millis() - startDownAt > 350) {
+    startIsReveal = true; needRedraw = true;      // entered reveal
+  }
+  if (startPrevHeld && !held) {                    // released
+    if (!startIsReveal) callMeeting();             // it was a quick tap
+    startIsReveal = false; needRedraw = true;      // leaving reveal -> redraw HUD
+  }
+  startPrevHeld = held;
+  revealActive = startIsReveal && held;
 }
 
 static void gatherInput() {
@@ -290,18 +305,6 @@ void gameUpdate() {
     return;
   }
 
-  // role-card overlay (press A near the start)
-  if (millis() < revealUntil) {
-    if (!revealDrawn) {
-      revealDrawn = true;
-      const PlayerColor &c = colorByIndex(myColorIndex());
-      showRoleCard(c.r, c.g, c.b, myRole == ROLE_IMP);
-    }
-    return;
-  } else if (revealDrawn) {
-    revealDrawn = false; needRedraw = true;
-  }
-
   // ---- input ----
   switch (phase) {
     case G_LOBBY:   lobbyInput();   break;
@@ -320,12 +323,13 @@ void gameUpdate() {
   if (isHost) {
     if (phase == G_DISCUSS && remainingSecs() == 0) { nVotes = 0; setPhaseHost(G_VOTING, cfgVote); }
     else if (phase == G_VOTING && (remainingSecs() == 0 || nVotes >= aliveCount())) hostTallyAndEject();
-    else if (phase == G_RESULT && millis() > phaseEnd) hostCheckWinOrResume();
+    else if (phase == G_RESULT && remainingSecs() == 0) hostCheckWinOrResume();
   }
 
-  // ---- LEDs during a meeting ----
+  // ---- LEDs: red for meetings, otherwise glow your profile color ----
   if (phase == G_GATHER) { bool on = (millis() / 400) % 2 == 0; flashLEDs(on ? 90 : 0, 0, 0, 500); }
   else if (phase == G_DISCUSS || phase == G_VOTING) flashLEDs(90, 0, 0, 250);
+  else { const PlayerColor &c = colorByIndex(myColorIndex()); flashLEDs(c.r, c.g, c.b, 250); }
 
   // ---- rendering ----
   int cd = remainingSecs();
@@ -341,9 +345,13 @@ void gameUpdate() {
     case G_PLAYING:
       if (needRedraw) {
         const PlayerColor &c = colorByIndex(myColorIndex());
-        int mi = rosterIndexOfId(myId());
-        bool alive = (mi < 0) || aliveIdx(mi);
-        showHUD(alive, myRole == ROLE_IMP, aliveCount(), c.r, c.g, c.b);
+        if (revealActive) {
+          showRoleCard(c.r, c.g, c.b, myRole == ROLE_IMP);  // held START
+        } else {
+          int mi = rosterIndexOfId(myId());
+          bool alive = (mi < 0) || aliveIdx(mi);
+          showHUD(alive, aliveCount(), c.r, c.g, c.b);      // color only
+        }
       }
       break;
     case G_GATHER:
