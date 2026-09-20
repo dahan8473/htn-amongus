@@ -43,8 +43,32 @@ void updateDisplay(float roll, float pitch) {
   tft.setCursor(20, 60);
   tft.print("Roll:  ");
   tft.print(rollStr);
-  
+
   tft.setCursor(20, 120);
   tft.print("Pitch: ");
   tft.print(pitchStr);
+}
+
+void showMeetingScreen() {
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_RED, ST77XX_BLACK);
+  tft.setTextSize(3);
+  tft.setCursor(20, 50);
+  tft.print("EMERGENCY");
+  tft.setCursor(70, 90);
+  tft.print("MEETING");
+}
+
+void showMeetingCountdown(int secondsLeft) {
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+  tft.setTextSize(2);
+  char buf[24];
+  // trailing spaces keep the width fixed so old digits don't ghost
+  snprintf(buf, sizeof(buf), "Discuss: %2ds  ", secondsLeft);
+  tft.setCursor(60, 160);
+  tft.print(buf);
+}
+
+void clearScreen() {
+  tft.fillScreen(ST77XX_BLACK);
 }

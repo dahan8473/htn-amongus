@@ -4,12 +4,8 @@
 #include <string.h>
 #include "broadcast.h"
 #include "wifi_sta.h"
-#include "leds.h"
-#include "buttons.h"
 
 #define BROADCAST_PORT 4210
-#define ALERT_MSG "ALERT"
-#define ALERT_FLASH_MS 5000
 
 static WiFiUDP udp;
 
@@ -25,39 +21,28 @@ static IPAddress broadcastAddress() {
   return bcast;
 }
 
-static void sendAlert() {
-  udp.beginPacket(broadcastAddress(), BROADCAST_PORT);
-  udp.write((const uint8_t *)ALERT_MSG, strlen(ALERT_MSG));
-  udp.endPacket();
-}
-
 void setupBroadcast() {
   udp.begin(BROADCAST_PORT);
 }
 
-void updateBroadcast() {
+void broadcastMessage(const char *msg) {
   if (!isWiFiConnected()) {
     return;
   }
+  udp.beginPacket(broadcastAddress(), BROADCAST_PORT);
+  udp.write((const uint8_t *)msg, strlen(msg));
+  udp.endPacket();
+}
 
-  if (isButtonPressed(BTN_START)) {
-    Serial.println("START pressed, broadcasting alert to all badges");
-    sendAlert();
-    flashLEDs(80, 0, 0, ALERT_FLASH_MS); // flash our own LEDs immediately too
-  }
-
+int pollMessage(char *buf, int maxLen) {
   int packetSize = udp.parsePacket();
   if (packetSize <= 0) {
-    return;
+    return 0;
   }
-  char buf[16];
-  int len = udp.read(buf, sizeof(buf) - 1);
+  int len = udp.read(buf, maxLen - 1);
   if (len <= 0) {
-    return;
+    return 0;
   }
   buf[len] = '\0';
-  if (strcmp(buf, ALERT_MSG) == 0) {
-    Serial.println("alert received, flashing red");
-    flashLEDs(80, 0, 0, ALERT_FLASH_MS);
-  }
+  return len;
 }

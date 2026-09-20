@@ -1,9 +1,13 @@
 #pragma once
 
-// UDP broadcast alert used to verify multiple badges can signal each other
-// over WiFi. When any badge's START button is pressed, it broadcasts an
-// alert onto the LAN; every badge that hears it (including the sender)
-// flashes its LEDs red for a few seconds -- a visual, no-laptop-needed test
-// that broadcast reaches every badge.
+// WiFi UDP broadcast transport: every badge on the game network can send a
+// short tagged message that all the others (and itself) receive. This is the
+// pipe the game rides on -- no laptop or broker in the middle.
 void setupBroadcast();
-void updateBroadcast();
+
+// Send a message string to every badge on the subnet.
+void broadcastMessage(const char *msg);
+
+// Non-blocking receive. Copies one waiting message into buf (NUL-terminated)
+// and returns its length, or 0 if nothing is waiting.
+int pollMessage(char *buf, int maxLen);

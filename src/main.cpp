@@ -1,10 +1,12 @@
 #include <Arduino.h>
+#include <string.h>
 #include "leds.h"
 #include "display.h"
 #include "imu.h"
 #include "wifi_sta.h"
 #include "broadcast.h"
 #include "buttons.h"
+#include "meeting.h"
 
 unsigned long lastDisplayUpdate = 0;
 
@@ -24,19 +26,33 @@ void setup() {
 }
 
 void loop() {
-  // 1. Keep the rainbow animation running continuously
+  // LEDs and buttons every loop. updateLEDs() shows a red flash while one is
+  // active (e.g. during a meeting) and the rainbow otherwise.
   updateLEDs();
-
   updateButtons();
-  updateBroadcast();
 
-  // 2. Read IMU and update the screen at 10Hz to prevent lag
-  if (millis() - lastDisplayUpdate > 100) {
+  // Press START to call an emergency meeting for everyone.
+  if (isButtonPressed(BTN_START)) {
+    Serial.println("START pressed -> calling emergency meeting");
+    triggerEmergencyMeeting();
+  }
+
+  // Receive broadcasts from other badges and dispatch by message type.
+  char msg[32];
+  if (pollMessage(msg, sizeof(msg)) > 0) {
+    if (strcmp(msg, MEETING_MSG) == 0) {
+      Serial.println("meeting called by another badge");
+      startMeeting();
+    }
+  }
+
+  if (isMeetingActive()) {
+    // Meeting owns the screen; skip the tilt view until it ends.
+    updateMeeting();
+  } else if (millis() - lastDisplayUpdate > 100) {
     lastDisplayUpdate = millis();
-    
     float roll = 0;
     float pitch = 0;
-    
     getRollPitch(roll, pitch);
     updateDisplay(roll, pitch);
   }
