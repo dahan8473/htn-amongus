@@ -127,7 +127,7 @@ static void drawMiniMate(int cx, int cy, uint16_t body) {
 
 void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
                   int nTeam, const uint8_t *teamR, const uint8_t *teamG,
-                  const uint8_t *teamB) {
+                  const uint8_t *teamB, int killCooldownSecs) {
   uint16_t bg = isImpostor ? tft.color565(40, 0, 0) : tft.color565(0, 10, 30);
   uint16_t banner = isImpostor ? C_RED : tft.color565(40, 90, 220);
   tft.fillScreen(bg);
@@ -145,6 +145,11 @@ void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
   tft.setCursor(140, 100);
   tft.print(isImpostor ? "Sabotage & kill" : "Do your tasks");
 
+  // how to use the B button, since it does double duty (kill vs. report)
+  tft.setTextColor(tft.color565(200, 200, 210), bg);
+  tft.setCursor(140, 120);
+  tft.print(isImpostor ? "Hold B = kill" : "Hold B = report");
+
   // fellow impostors, if any
   if (isImpostor && nTeam > 0) {
     tft.setTextColor(tft.color565(255, 170, 170), bg);
@@ -153,6 +158,20 @@ void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
     tft.print("Team:");
     for (int i = 0; i < nTeam && i < 6; i++) {
       drawMiniMate(230 + i * 26, 150, tft.color565(teamR[i], teamG[i], teamB[i]));
+    }
+  }
+
+  // kill cooldown, so the impostor knows when they can attack again
+  if (isImpostor) {
+    tft.setTextSize(2);
+    tft.setCursor(140, 185);
+    if (killCooldownSecs > 0) {
+      tft.setTextColor(tft.color565(255, 140, 60), bg);
+      char buf[20]; snprintf(buf, sizeof(buf), "Cooldown: %ds ", killCooldownSecs);
+      tft.print(buf);
+    } else {
+      tft.setTextColor(tft.color565(120, 230, 140), bg);
+      tft.print("Ready to kill ");
     }
   }
 }
@@ -192,7 +211,8 @@ void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
   tft.print("START = play");
 }
 
-void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB) {
+void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB,
+             bool bodyNearby) {
   tft.fillScreen(C_NAVY);
   if (!alive) {
     drawCrewmate(80, 120, tft.color565(70, 70, 80));  // grey ghost
@@ -216,6 +236,16 @@ void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB) {
   char b[20]; snprintf(b, sizeof(b), "Alive: %d ", aliveCount);
   tft.setCursor(150, 115);
   tft.print(b);
+
+  if (bodyNearby) {
+    tft.setTextColor(C_RED, C_NAVY);
+    tft.setTextSize(2);
+    tft.setCursor(150, 148);
+    tft.print("BODY NEARBY");
+    tft.setCursor(150, 170);
+    tft.print("HOLD B=report");
+  }
+
   tft.setTextColor(tft.color565(150, 150, 170), C_NAVY);
   tft.setCursor(14, 200);
   tft.print("tap HOME=meeting");

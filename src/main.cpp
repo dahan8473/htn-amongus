@@ -3,7 +3,7 @@
 #include "leds.h"
 #include "display.h"
 #include "imu.h"
-#include "wifi_sta.h"
+#include "espnow_radio.h"
 #include "broadcast.h"
 #include "buttons.h"
 #include "nfc.h"
@@ -16,24 +16,25 @@
 unsigned long lastPresence = 0;
 unsigned long lastProxDebug = 0;
 bool nfcEnabled = false;
-bool testMode = false;   // solo task-test harness (hold START at boot)
+bool testMode = false;   // solo task-test harness (hold A at boot)
+bool immortal = false;
 
 void setup() {
   Serial.begin(115200);
 
   setupLEDs();
   setupDisplay();
+  setupEspNowRadio();
+  setupBroadcast();
   setupButtons();
 
-  // Hold A while booting -> solo task test mode; skip all networking.
+  // Hold A while booting -> solo task test mode; skip game/roster/proximity.
   // (Not START: START is GPIO9, the boot strapping pin -- holding it at reset
   //  drops the chip into download mode instead of running firmware.)
   for (int i = 0; i < 6; i++) { updateButtons(); delay(12); }
   testMode = isButtonHeld(BTN_A);
 
   if (!testMode) {
-    setupWiFi();
-    setupBroadcast();
     setupPlayers();
     setupGame();
     setupProximity(myId());  // ESP-NOW ranging for kills / body reports
@@ -52,6 +53,7 @@ void setup() {
 void loop() {
   updateLEDs();
   updateButtons();
+  updateBroadcast();  // fires any due mesh relays
 
   // solo test harness owns everything when active
   if (testMode) { taskTestLoop(); return; }
@@ -82,9 +84,21 @@ void loop() {
   if (nfcEnabled) {
     String uid = scanNFC();
     if (uid != "") {
-      Serial.print("Scanned tag UID: "); Serial.println(uid);  // for hard-mapping later
+      Serial.print("Scanned tag UID: "); Serial.println(uid);
       gameOnNfc(uid.c_str());
     }
+  }
+
+  // AUX1 maintained switch: demo-mode immortality toggle. While ON, this
+  // badge can't be killed or even targeted, regardless of proximity to an
+  // impostor -- synced out so the host (which validates every kill) knows.
+  bool sw = isButtonHeld(BTN_AUX1);
+  if (sw != immortal) {
+    immortal = sw;
+    setImmortalId(myId(), immortal);
+    char m[16]; snprintf(m, sizeof(m), "IMM:%s:%d", myId(), immortal ? 1 : 0);
+    broadcastMessage(m);
+    Serial.println(immortal ? "IMMORTAL" : "MORTAL");
   }
 
   updateProximity();  // send the next ESP-NOW proximity beacon when due

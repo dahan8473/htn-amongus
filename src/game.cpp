@@ -49,6 +49,7 @@ static unsigned long bDownAt = 0;
 static bool bActed = false;
 static unsigned long lastKillMs[MAX_PLAYERS] = { 0 };  // host kill cooldown
 static unsigned long killedFlashUntil = 0;             // red flash when I die
+static unsigned long myKillCooldownUntil = 0;          // this badge's own cooldown, for UI + client-side gating
 
 static int voteSel = 0;
 static bool myVoted = false;
@@ -82,6 +83,8 @@ static void parseTally(const char *s) {
 static bool needRedraw = true;
 static int lastCd = -1;
 static int lastLobbyPlayers = -1;
+static bool bodyNearby = false;  // drives the "hold B to report" HUD hint
+static int lastKillCdShown = -1; // drives the role-card cooldown redraw tick
 
 // crew task progress (host authoritative, broadcast via PROG)
 static int taskDone = 0, taskTotal = 0;
@@ -148,6 +151,12 @@ static void hostStartGame() {
   int nImp = cfgImp; if (nImp >= n) nImp = 1; if (nImp < 1) nImp = 1;
   bool imp[MAX_PLAYERS] = { false };
   int chosen = 0;
+
+  // Whoever starts the game (the host) is always guaranteed to be an
+  // impostor; any additional impostor slots are randomized among the rest.
+  int hostIdx = rosterIndexOfId(myId());
+  if (hostIdx >= 0) { imp[hostIdx] = true; chosen++; }
+
   while (chosen < nImp && chosen < n) {
     int k = esp_random() % n;
     if (!imp[k]) { imp[k] = true; chosen++; }
@@ -168,6 +177,7 @@ static void hostStartGame() {
     broadcastMessage(m);
     if (strcmp(rosterId(i), myId()) == 0) {
       myRole = role;
+      myKillCooldownUntil = 0;  // fresh cooldown for the new round
       if (role == ROLE_IMP) storeImpTeam(impCsv);
     }
   }
@@ -257,6 +267,7 @@ static void hostKill(const char *killer, const char *target) {
   if (ki < 0 || ti < 0) return;
   if (roleIdx(ki) != ROLE_IMP || !aliveIdx(ki)) return;
   if (!aliveIdx(ti) || roleIdx(ti) == ROLE_IMP) return;
+  if (immortalIdx(ti)) return;  // demo-mode: impervious to kills
   if (millis() - lastKillMs[ki] < KILL_CD_MS) return;
   lastKillMs[ki] = millis();
   setAliveId(target, false);
@@ -298,6 +309,7 @@ void gameHandleMessage(const char *msg) {
       setRoleId(id, role);
       if (strcmp(id, myId()) == 0) {
         myRole = role;
+        myKillCooldownUntil = 0;  // fresh cooldown for the new round
         if (role == ROLE_IMP && got == 3) storeImpTeam(csv);
       }
     }
@@ -329,6 +341,9 @@ void gameHandleMessage(const char *msg) {
     setAliveId(id, false);
     if (strcmp(id, myId()) == 0) killedFlashUntil = millis() + 1500;
     needRedraw = true;
+  } else if (strncmp(msg, "IMM:", 4) == 0) {
+    char id[ID_LEN]; int val = 0;
+    if (sscanf(msg, "IMM:%4[^:]:%d", id, &val) == 2) setImmortalId(id, val != 0);
   }
   // ---- host acts on requests ----
   else if (isHost && strncmp(msg, "KILL:", 5) == 0) {
@@ -398,7 +413,7 @@ static const char *nearestKillTarget() {
   const char *best = nullptr; int bestR = KILL_RSSI - 1;
   for (int i = 0; i < rosterCount(); i++) {
     const char *id = rosterId(i);
-    if (strcmp(id, myId()) == 0 || !aliveIdx(i) || isTeammate(id)) continue;
+    if (strcmp(id, myId()) == 0 || !aliveIdx(i) || isTeammate(id) || immortalIdx(i)) continue;
     int r = proximityRssi(id);
     if (r >= KILL_RSSI && r > bestR) { bestR = r; best = id; }
   }
@@ -429,11 +444,25 @@ static void playingInput() {
   // B: hold to kill (impostor, nearest crew in range) or report a nearby body.
   int mi = rosterIndexOfId(myId());
   bool alive = (mi < 0) || aliveIdx(mi);
+
+  // surface a "body nearby, hold B" HUD hint as proximity changes, independent
+  // of whether B is actually pressed -- reporting doesn't change who's dead,
+  // it only ever triggers a meeting, so this is purely a UI affordance.
+  bool nowBodyNearby = alive && (nearestBody() != nullptr);
+  if (nowBodyNearby != bodyNearby) { bodyNearby = nowBodyNearby; needRedraw = true; }
+
   bool bheld = isButtonHeld(BTN_B);
   if (isButtonPressed(BTN_B)) { bDownAt = millis(); bActed = false; }
   if (alive && bheld && !bActed && millis() - bDownAt > KILL_HOLD_MS) {
     bActed = true;
-    const char *tgt = (myRole == ROLE_IMP) ? nearestKillTarget() : nullptr;
+    bool offCooldown = millis() >= myKillCooldownUntil;
+    const char *tgt = (myRole == ROLE_IMP && offCooldown) ? nearestKillTarget() : nullptr;
+    if (myRole == ROLE_IMP) {
+      // holding B always restarts the cooldown, hit or miss -- an impostor
+      // can't spam it to fish for a target for free.
+      myKillCooldownUntil = millis() + KILL_CD_MS;
+      needRedraw = true;
+    }
     if (tgt) {
       if (isHost) hostKill(myId(), tgt);
       else { char m[24]; snprintf(m, sizeof(m), "KILL:%s:%s", myId(), tgt); req(m); }
@@ -564,8 +593,11 @@ void gameUpdate() {
         showLobby(rosterCount(), cfgImp, cfgDisc, cfgVote, cfgMeet, setSel, c.r, c.g, c.b);
       }
       break;
-    case G_PLAYING:
-      if (needRedraw) {
+    case G_PLAYING: {
+      long killRemainMs = (long)myKillCooldownUntil - (long)millis();
+      int killCdSecs = killRemainMs > 0 ? (int)((killRemainMs + 999) / 1000) : 0;
+      bool killCdTick = revealActive && (killCdSecs != lastKillCdShown);
+      if (needRedraw || killCdTick) {
         const PlayerColor &c = colorByIndex(myColorIndex());
         if (revealActive) {
           uint8_t tr[MAX_PLAYERS], tg[MAX_PLAYERS], tb[MAX_PLAYERS];
@@ -576,15 +608,17 @@ void gameUpdate() {
               if (ri >= 0) { const PlayerColor &tc = colorByIndex(rosterColorIndex(ri)); tr[nt] = tc.r; tg[nt] = tc.g; tb[nt] = tc.b; nt++; }
             }
           }
-          showRoleCard(c.r, c.g, c.b, myRole == ROLE_IMP, nt, tr, tg, tb);  // held START
+          showRoleCard(c.r, c.g, c.b, myRole == ROLE_IMP, nt, tr, tg, tb, killCdSecs);  // held START
         } else {
           int mi = rosterIndexOfId(myId());
           bool alive = (mi < 0) || aliveIdx(mi);
-          showHUD(alive, aliveCount(), c.r, c.g, c.b);      // color only
+          showHUD(alive, aliveCount(), c.r, c.g, c.b, bodyNearby);  // color + body hint
           drawTaskBar(taskTotal > 0 ? taskDone * 100 / taskTotal : 0);
         }
       }
+      lastKillCdShown = killCdSecs;
       break;
+    }
     case G_GATHER:
       if (needRedraw) { showMeetingScreen(); showMeetingWaiting(); }
       break;

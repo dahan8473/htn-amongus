@@ -13,10 +13,12 @@ void clearScreen();
 
 // Role reveal card: a crewmate in the player's color, CREWMATE (blue) or
 // IMPOSTOR (red) banner. If impostor, small crewmate icons for each teammate
-// color are drawn on the left so you know your fellow impostors.
+// color are drawn on the left so you know your fellow impostors, plus a kill
+// cooldown readout (killCooldownSecs seconds remaining, or "Ready to kill"
+// at 0). killCooldownSecs is ignored when not an impostor.
 void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
                   int nTeam, const uint8_t *teamR, const uint8_t *teamG,
-                  const uint8_t *teamB);
+                  const uint8_t *teamB, int killCooldownSecs);
 
 // Lobby: AMONG US logo, crewmate in your color, player count, and the
 // host-adjustable settings list with a cursor on row `sel`.
@@ -24,8 +26,10 @@ void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
                int colorR, int colorG, int colorB);
 
 // In-game status: your crewmate + color, alive count (or GHOST if dead).
-// Role is NOT shown here -- hold START to see it.
-void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB);
+// Role is NOT shown here -- hold START to see it. bodyNearby shows a
+// "hold B to report" hint whenever a dead player is within report range.
+void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB,
+             bool bodyNearby);
 
 // Voting screen: the current pick (a color, or SKIP), countdown, and hints.
 void showVote(const char *name, int colorR, int colorG, int colorB,

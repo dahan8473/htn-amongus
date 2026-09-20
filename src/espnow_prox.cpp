@@ -1,33 +1,13 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <esp_now.h>
-#include <esp_wifi.h>
+#include <math.h>
 #include <string.h>
 #include "espnow_prox.h"
+#include "espnow_radio.h"
 
 #define PROX_MAX                16
 #define PROX_STALE_MS           3000
 #define PROX_BEACON_INTERVAL_MS 200
-
-// First byte of every ESP-NOW frame tells proximity beacons and game messages
-// apart, so both can share the one broadcast + one receive callback.
-#define NET_T_PROX 0x01
-#define NET_T_MSG  0x02
-
-// Received game messages wait here until the main loop polls them.
-#define MSGQ_N   10
-#define MSGQ_LEN 64
-static char msgq[MSGQ_N][MSGQ_LEN];
-static int msgHead = 0, msgTail = 0;
-static portMUX_TYPE msgMux = portMUX_INITIALIZER_UNLOCKED;
-
-static const uint8_t BCAST_MAC[ESP_NOW_ETH_ALEN] = {
-  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-};
-
-struct ProxBeacon {
-  char id[5];
-};
+#define PKT_PROX                0xA1
 
 struct Rec {
   char id[5];
@@ -40,7 +20,6 @@ static Rec recs[PROX_MAX];
 static int nRecs = 0;
 static char ownId[5] = "";
 static unsigned long lastBeaconMs = 0;
-static bool espNowReady = false;
 static portMUX_TYPE recMux = portMUX_INITIALIZER_UNLOCKED;
 
 static void record(const char *id, int rssi) {
@@ -70,99 +49,30 @@ static void record(const char *id, int rssi) {
   portEXIT_CRITICAL(&recMux);
 }
 
-static void onReceive(const esp_now_recv_info_t *info,
-                      const uint8_t *data, int len) {
-  if (!info || len < 1) return;
-
-  if (data[0] == NET_T_PROX) {
-    if (!info->rx_ctrl || len != 1 + (int)sizeof(ProxBeacon)) return;
-    ProxBeacon beacon;
-    memcpy(&beacon, data + 1, sizeof(beacon));
-    beacon.id[sizeof(beacon.id) - 1] = '\0';
-    if (strlen(beacon.id) != 4) return;
-    record(beacon.id, info->rx_ctrl->rssi);
-    return;
-  }
-
-  if (data[0] == NET_T_MSG) {
-    int n = len - 1;
-    if (n <= 0) return;
-    if (n > MSGQ_LEN - 1) n = MSGQ_LEN - 1;
-    portENTER_CRITICAL(&msgMux);
-    int next = (msgHead + 1) % MSGQ_N;
-    if (next != msgTail) {             // drop if the queue is full
-      memcpy(msgq[msgHead], data + 1, n);
-      msgq[msgHead][n] = '\0';
-      msgHead = next;
-    }
-    portEXIT_CRITICAL(&msgMux);
-  }
+static void onProxRecv(const uint8_t *mac, int rssi, const uint8_t *data, int len) {
+  if (len != 4) return;
+  char id[5];
+  memcpy(id, data, 4);
+  id[4] = '\0';
+  record(id, rssi);
 }
 
 void setupProximity(const char *myId) {
   strncpy(ownId, myId, sizeof(ownId));
   ownId[sizeof(ownId) - 1] = '\0';
 
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("ESP-NOW proximity init failed");
-    return;
-  }
-  if (esp_now_register_recv_cb(onReceive) != ESP_OK) {
-    Serial.println("ESP-NOW receive callback failed");
-    esp_now_deinit();
-    return;
-  }
-
-  esp_now_peer_info_t peer = {};
-  memset(peer.peer_addr, 0xFF, ESP_NOW_ETH_ALEN);
-  peer.channel = 0;  // 0 = use the radio's current (fixed) channel, set in setupWiFi
-  peer.ifidx = WIFI_IF_STA;
-  peer.encrypt = false;
-  esp_err_t addResult = esp_now_add_peer(&peer);
-  if (addResult != ESP_OK && addResult != ESP_ERR_ESPNOW_EXIST) {
-    Serial.printf("ESP-NOW broadcast peer failed: %d\n", addResult);
-    esp_now_deinit();
-    return;
-  }
-
-  espNowReady = true;
-  Serial.println("ESP-NOW proximity ready");
+  espNowOnReceive(PKT_PROX, onProxRecv);
 }
 
 void updateProximity() {
-  if (!espNowReady) return;
   unsigned long now = millis();
   if (now - lastBeaconMs < PROX_BEACON_INTERVAL_MS) return;
   lastBeaconMs = now;
 
-  uint8_t buf[1 + sizeof(ProxBeacon)] = {0};
-  buf[0] = NET_T_PROX;
-  ProxBeacon beacon = {};
-  strncpy(beacon.id, ownId, sizeof(beacon.id));
-  memcpy(buf + 1, &beacon, sizeof(beacon));
-  esp_now_send(BCAST_MAC, buf, sizeof(buf));
-}
-
-// ---- game message bus (rides the same ESP-NOW broadcast) ----
-
-void espnowSendMsg(const char *msg) {
-  if (!espNowReady) return;
-  int n = strlen(msg);
-  if (n > MSGQ_LEN - 1) n = MSGQ_LEN - 1;
-  uint8_t buf[1 + MSGQ_LEN];
-  buf[0] = NET_T_MSG;
-  memcpy(buf + 1, msg, n);
-  esp_now_send(BCAST_MAC, buf, 1 + n);
-}
-
-int espnowPollMsg(char *out, int maxLen) {
-  portENTER_CRITICAL(&msgMux);
-  if (msgTail == msgHead) { portEXIT_CRITICAL(&msgMux); return 0; }
-  strncpy(out, msgq[msgTail], maxLen - 1);
-  out[maxLen - 1] = '\0';
-  msgTail = (msgTail + 1) % MSGQ_N;
-  portEXIT_CRITICAL(&msgMux);
-  return strlen(out);
+  uint8_t buf[5];
+  buf[0] = PKT_PROX;
+  memcpy(buf + 1, ownId, 4);
+  espNowSend(buf, 5);
 }
 
 int proximityRssi(const char *id) {
@@ -188,14 +98,28 @@ void debugProximity() {
   portEXIT_CRITICAL(&recMux);
 
   Serial.print("PROX");
+  if (count == 0) {
+    Serial.println(" none");
+    return;
+  }
   unsigned long now = millis();
   for (int i = 0; i < count; i++) {
     if (!snapshot[i].initialized) continue;
     Serial.print(" ");
     Serial.print(snapshot[i].id);
     Serial.print("=");
-    if (now - snapshot[i].ms < PROX_STALE_MS) Serial.print(snapshot[i].rssi);
-    else Serial.print("stale");
+    if (now - snapshot[i].ms < PROX_STALE_MS) {
+      Serial.print(snapshot[i].rssi);
+      // Very rough free-space/path-loss estimate. RSSI is not a tape measure;
+      // these constants are only useful as a starting point for calibration.
+      const float rssiAtOneMeter = -55.0f;
+      const float pathLossExponent = 2.5f;
+      float metres = powf(10.0f,
+        (rssiAtOneMeter - snapshot[i].rssi) / (10.0f * pathLossExponent));
+      Serial.print("dBm(~");
+      Serial.print(metres, 1);
+      Serial.print("m)");
+    } else Serial.print("stale");
   }
   Serial.println();
 }
