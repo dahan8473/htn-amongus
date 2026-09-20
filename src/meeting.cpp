@@ -3,6 +3,7 @@
 #include "broadcast.h"
 #include "leds.h"
 #include "display.h"
+#include "voting.h"
 
 #define MEETING_MS 20000  // discussion countdown length
 #define BLINK_MS   400    // gather-stage red blink period
@@ -44,10 +45,20 @@ void endMeeting() {
   clearScreen();                   // hand the screen back to the tilt view
 }
 
+// Move from discussion into the vote (timer ran out or B pressed early).
+static void goToVote() {
+  broadcastMessage(VOTESTART_MSG);
+  phase = M_OFF;
+  startVoting();
+}
+
 void endMeetingEarly() {
-  if (phase == M_OFF) return;
-  broadcastMessage(ENDMTG_MSG);
-  endMeeting();
+  if (phase == M_GATHER) {
+    broadcastMessage(ENDMTG_MSG);  // cancel a meeting nobody started discussing
+    endMeeting();
+  } else if (phase == M_DISCUSS) {
+    goToVote();                    // B during discussion -> go vote now
+  }
 }
 
 bool isMeetingActive() { return phase != M_OFF; }
@@ -67,7 +78,7 @@ void updateMeeting() {
   flashLEDs(90, 0, 0, 250);        // re-armed each loop so it holds
   long remaining = (long)endTime - (long)millis();
   if (remaining <= 0) {
-    endMeeting();
+    goToVote();                    // discussion over -> everyone votes
     return;
   }
   int secs = (int)((remaining + 999) / 1000);

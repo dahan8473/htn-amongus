@@ -10,10 +10,12 @@
 #include "nfc.h"
 #include "players.h"
 #include "roles.h"
+#include "voting.h"
 
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastPresence = 0;
 bool nfcEnabled = false;
+int lastTitlePlayers = -1;  // so the title only redraws when the count changes
 
 void setup() {
   Serial.begin(115200);
@@ -43,20 +45,22 @@ void loop() {
     sendPresence();
   }
 
-  // ---- controls ----
-  if (isButtonPressed(BTN_START)) {
-    if (gamePhase() == PHASE_LOBBY) {
-      startGameAsHost();          // in the lobby, START begins the game
-    } else {
-      triggerEmergencyMeeting();  // in game, START calls a meeting
-    }
+  // ---- controls (context-sensitive) ----
+  if (isButtonPressed(BTN_START) && !isVotingActive()) {
+    if (gamePhase() == PHASE_LOBBY) startGameAsHost();  // lobby: start game
+    else triggerEmergencyMeeting();                     // in game: call meeting
   }
   if (isButtonPressed(BTN_A)) {
-    if (isMeetingGathering()) confirmEveryoneHere();  // everyone's here -> timer
-    else if (gamePhase() == PHASE_PLAY) requestRoleReveal();  // peek role card
+    if (isVotingActive()) castVote();
+    else if (isMeetingGathering()) confirmEveryoneHere();
+    else if (gamePhase() == PHASE_PLAY) requestRoleReveal();
   }
   if (isButtonPressed(BTN_B) && isMeetingActive()) {
     endMeetingEarly();
+  }
+  if (isVotingActive()) {
+    if (isButtonPressed(BTN_LEFT)) voteSelect(-1);
+    if (isButtonPressed(BTN_RIGHT)) voteSelect(1);
   }
 
   // ---- receive broadcasts and dispatch ----
@@ -71,6 +75,10 @@ void loop() {
       beginDiscussion();
     } else if (strcmp(msg, ENDMTG_MSG) == 0) {
       endMeeting();
+    } else if (strcmp(msg, VOTESTART_MSG) == 0) {
+      startVoting();
+    } else if (strncmp(msg, "VOTE:", 5) == 0) {
+      handleVoteMessage(msg);
     } else {
       handleGameMessage(msg);  // ROLE:/PLAY/ENDGAME
     }
@@ -88,13 +96,27 @@ void loop() {
     if (uid != "") { Serial.print("Task UID: "); Serial.println(uid); }
   }
 
-  // ---- screen ownership: meeting > role reveal > tilt view ----
-  updateRoles();  // manages the role-card reveal window
+  // ---- screen ownership: meeting > voting > role reveal > title/tilt ----
+  updateRoles();
   if (isMeetingActive()) {
     updateMeeting();
+    lastTitlePlayers = -1;
+  } else if (isVotingActive()) {
+    updateVoting();
+    lastTitlePlayers = -1;
   } else if (isRevealing()) {
-    // role card is on screen; nothing else to draw
+    // role card owns the screen
+    lastTitlePlayers = -1;
+  } else if (gamePhase() == PHASE_LOBBY) {
+    // title screen; redraw only when the player count changes
+    if (rosterCount() != lastTitlePlayers) {
+      lastTitlePlayers = rosterCount();
+      const PlayerColor &c = colorByIndex(myColorIndex());
+      showTitleScreen(rosterCount(), c.r, c.g, c.b);
+    }
   } else if (millis() - lastDisplayUpdate > 100) {
+    // in-game idle: tilt + NFC view
+    lastTitlePlayers = -1;
     lastDisplayUpdate = millis();
     float x_angle = 0, y_angle = 0;
     getRollPitch(x_angle, y_angle);
