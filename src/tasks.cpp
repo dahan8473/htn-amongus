@@ -5,6 +5,7 @@
 #include "buttons.h"
 #include "imu.h"
 #include "display.h"
+#include "leds.h"
 
 #define TASK_TIMEOUT_MS 20000
 
@@ -17,7 +18,8 @@ static int justCompleted = -1;
 // per-minigame state
 static int seq[6], seqPos, wireRound;      // 0: wires (multiple sequences)
 static int shakeFill; static unsigned long lastShake;  // 1: shake
-static unsigned long levelSince;           // 2: stabilize
+static float navX, navY, navVX, navVY, navPX, navPY;   // 2: navigate (tilt-roll)
+static int navTX, navTY, navHits;
 static int calRound; static float calPos, calDir, calZoneL, calZoneW;  // 3: calibrate
 
 static uint16_t NAVY, WHITE, GREEN, RED, YELLOW, DIM;
@@ -36,7 +38,7 @@ void resetTasks() {
 
 // -1 = normal (map each tag by hash). 0-3 = TEST: every tag launches this game.
 // Set to 0 to make any tag open Wires for single-tag testing.
-#define FORCE_TASK 0
+#define FORCE_TASK 2
 
 static int uidToTask(const char *uid) {
   if (FORCE_TASK >= 0) return FORCE_TASK;
@@ -52,7 +54,10 @@ static void enterTask(int t) {
   justCompleted = -1;
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) { shakeFill = 0; lastShake = 0; }
-  else if (t == 2) { levelSince = 0; }
+  else if (t == 2) {
+    navX = navPX = 160; navY = navPY = 135; navVX = navVY = 0; navHits = 0;
+    navTX = 40 + esp_random() % 240; navTY = 60 + esp_random() % 150;
+  }
   else if (t == 3) { calRound = 0; calPos = 0; calDir = 2.2f; calZoneL = 62; calZoneW = 26; }
 }
 
@@ -136,21 +141,44 @@ static void runShake() {
   gfxRectOutline(30, 110, 260, 30, WHITE);
 }
 
-static void runStabilize() {
-  if (!drewStatic) { gfxClear(NAVY); gfxText(40, 16, 3, WHITE, "STABILIZE"); gfxText(30, 210, 2, DIM, "hold it level 3s"); drewStatic = true; }
+static void newNavTarget() {
+  navTX = 40 + esp_random() % 240;
+  navTY = 60 + esp_random() % 150;
+}
+
+static void runNavigate() {
+  if (!drewStatic) {
+    gfxClear(NAVY);
+    gfxText(40, 10, 3, WHITE, "NAVIGATE");
+    gfxText(20, 218, 2, DIM, "tilt the ball to targets");
+    drewStatic = true;
+  }
   float r, p; getRollPitch(r, p);
-  bool level = (fabs(r) < 12 && fabs(p) < 12);
-  if (level) { if (levelSince == 0) levelSince = millis(); }
-  else levelSince = 0;
-  if (levelSince && millis() - levelSince >= 3000) { finish(); return; }
-  int cx = 160, cy = 120;
-  gfxFillRect(60, 60, 200, 120, NAVY);        // clear play area
-  gfxRectOutline(cx - 22, cy - 22, 44, 44, level ? GREEN : DIM);  // target zone
-  int bx = cx + (int)(p * 3.0f), by = cy + (int)(r * 3.0f);
-  if (bx < 70) bx = 70; if (bx > 250) bx = 250; if (by < 70) by = 70; if (by > 170) by = 170;
-  gfxFillCircle(bx, by, 10, level ? GREEN : YELLOW);
-  int held = levelSince ? (int)(millis() - levelSince) : 0;
-  gfxFillRect(60, 190, 200 * held / 3000, 8, GREEN);
+  navVX += p * 0.06f; navVY += r * 0.06f;      // tilt accelerates the ball
+  navVX *= 0.90f; navVY *= 0.90f;              // friction
+  navX += navVX; navY += navVY;
+  if (navX < 20) { navX = 20; navVX = -navVX * 0.5f; }
+  if (navX > 300) { navX = 300; navVX = -navVX * 0.5f; }
+  if (navY < 45) { navY = 45; navVY = -navVY * 0.5f; }
+  if (navY > 205) { navY = 205; navVY = -navVY * 0.5f; }
+
+  float dx = navX - navTX, dy = navY - navTY;
+  if (dx * dx + dy * dy < 22 * 22) {           // reached the target
+    navHits++;
+    flashLEDs(0, 200, 0, 250);                 // green hit flash
+    if (navHits >= 3) { finish(); return; }
+    newNavTarget();
+    drewStatic = false;                        // repaint (clears old target)
+    return;
+  }
+
+  gfxFillCircle((int)navPX, (int)navPY, 9, NAVY);   // erase old ball
+  gfxFillCircle(navTX, navTY, 14, YELLOW);          // target
+  gfxFillCircle((int)navX, (int)navY, 8, gfxColor(60, 200, 210));  // ball
+  navPX = navX; navPY = navY;
+  char h[12]; snprintf(h, sizeof(h), "%d/3", navHits);
+  gfxFillRect(280, 40, 36, 20, NAVY);
+  gfxText(280, 42, 2, GREEN, h);
 }
 
 static void runCalibrate() {
@@ -183,7 +211,7 @@ void taskUpdate() {
   switch (curTask) {
     case 0: runWires(); break;
     case 1: runShake(); break;
-    case 2: runStabilize(); break;
+    case 2: runNavigate(); break;
     case 3: runCalibrate(); break;
   }
 }
