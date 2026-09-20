@@ -3,8 +3,8 @@
 #include <stdint.h>
 
 // Player identity + color + roster, plus per-player game state (alive, role,
-// meetings used). Each badge derives a stable id + color from its MAC and
-// beacons presence so every badge builds the same roster.
+// meetings used). Each badge derives a stable id and initial color from its
+// MAC; the host assigns unique colors from the shared palette at game start.
 
 #define MAX_PLAYERS 12
 #define ID_LEN      5   // 4 hex chars + NUL
@@ -23,6 +23,10 @@ const PlayerColor &colorByIndex(int i);
 
 void sendPresence();
 void notePresence(const char *id, int colorIdx);
+bool setColorId(const char *id, int colorIdx);
+bool assignUniqueColors();
+void lockColorAssignments();
+void unlockColorAssignments();
 
 int rosterCount();
 const char *rosterId(int i);
