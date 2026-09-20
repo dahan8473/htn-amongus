@@ -40,3 +40,14 @@ void showResult(const char *ejName, int ejR, int ejG, int ejB,
 
 // Winner screen.
 void showGameOver(bool crewWon);
+
+// ---- generic drawing primitives (for task minigames) ----
+uint16_t gfxColor(uint8_t r, uint8_t g, uint8_t b);
+void gfxClear(uint16_t color);
+void gfxText(int x, int y, int size, uint16_t color, const char *s);
+void gfxRectOutline(int x, int y, int w, int h, uint16_t color);
+void gfxFillRect(int x, int y, int w, int h, uint16_t color);
+void gfxFillCircle(int x, int y, int r, uint16_t color);
+
+// Thin crew task-progress bar across the top (pct 0-100).
+void drawTaskBar(int pct);

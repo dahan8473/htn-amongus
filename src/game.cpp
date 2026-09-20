@@ -10,6 +10,7 @@
 #include "imu.h"
 #include "leds.h"
 #include "espnow_prox.h"
+#include "tasks.h"
 
 #define KILL_RSSI    -66    // ~within a couple meters; tune on hardware
 #define REPORT_RSSI  -66
@@ -82,6 +83,9 @@ static bool needRedraw = true;
 static int lastCd = -1;
 static int lastLobbyPlayers = -1;
 
+// crew task progress (host authoritative, broadcast via PROG)
+static int taskDone = 0, taskTotal = 0;
+
 // ---------- helpers ----------
 static void storeImpTeam(const char *csv) {
   nImpTeam = 0;
@@ -101,11 +105,14 @@ static int remainingSecs() {
 }
 
 static void applyPhase(GPhase p, int durSecs) {
+  GPhase prev = phase;
   phase = p;
   phaseEnd = durSecs > 0 ? millis() + (unsigned long)durSecs * 1000 : 0;
   needRedraw = true;
   lastCd = -1;
   if (p == G_VOTING) { voteSel = 0; myVoted = false; }
+  if (prev == G_LOBBY && p == G_PLAYING) { resetTasks(); taskDone = 0; }  // new game
+  if (p != G_PLAYING && taskActive()) taskCancel();  // a meeting interrupts a task
 }
 
 static void setPhaseHost(GPhase p, int durSecs) {
@@ -166,6 +173,12 @@ static void hostStartGame() {
   }
   broadcastCfg();
   broadcastAlive();
+  // crew task pool: each crewmate must finish all NUM_TASKS
+  resetTasks();
+  taskDone = 0;
+  taskTotal = aliveRoleCount(ROLE_CREW) * NUM_TASKS;
+  char pm[24]; snprintf(pm, sizeof(pm), "PROG:%d:%d", taskDone, taskTotal);
+  broadcastMessage(pm);
   setPhaseHost(G_PLAYING, 0);
 }
 
@@ -261,6 +274,20 @@ static void hostReport(const char *reporter) {
   setPhaseHost(G_GATHER, 0);
 }
 
+// a crewmate finished a task (deduped on the sender). Advance the bar; a full
+// bar wins it for the crew.
+static void hostTaskDone() {
+  if (phase != G_PLAYING) return;
+  taskDone++;
+  char pm[24]; snprintf(pm, sizeof(pm), "PROG:%d:%d", taskDone, taskTotal);
+  broadcastMessage(pm);
+  if (taskTotal > 0 && taskDone >= taskTotal) {
+    winSide = 'C';
+    broadcastMessage("WIN:C");
+    setPhaseHost(G_OVER, 0);
+  }
+}
+
 // ---------- message handling (all badges) ----------
 void gameHandleMessage(const char *msg) {
   if (strncmp(msg, "ROLE:", 5) == 0) {
@@ -293,6 +320,8 @@ void gameHandleMessage(const char *msg) {
     needRedraw = true;
   } else if (strncmp(msg, "TAL:", 4) == 0) {
     parseTally(msg + 4); needRedraw = true;
+  } else if (strncmp(msg, "PROG:", 5) == 0) {
+    sscanf(msg, "PROG:%d:%d", &taskDone, &taskTotal); needRedraw = true;
   } else if (strncmp(msg, "WIN:", 4) == 0) {
     winSide = msg[4]; needRedraw = true;
   } else if (strncmp(msg, "DEAD:", 5) == 0) {
@@ -307,6 +336,8 @@ void gameHandleMessage(const char *msg) {
     if (sscanf(msg, "KILL:%4[^:]:%4s", k, t) == 2) hostKill(k, t);
   } else if (isHost && strncmp(msg, "RPT:", 4) == 0) {
     hostReport(msg + 4);
+  } else if (isHost && strncmp(msg, "TDONE:", 6) == 0) {
+    hostTaskDone();
   } else if (isHost && strncmp(msg, "RM:", 3) == 0) {
     if (phase == G_PLAYING) {
       const char *id = msg + 3;
@@ -455,6 +486,13 @@ void setupGame() {
   myRole = ROLE_NONE;
 }
 
+// called by main when an NFC tag is scanned: start that tag's task minigame
+void gameOnNfc(const char *uid) {
+  int mi = rosterIndexOfId(myId());
+  bool alive = (mi < 0) || aliveIdx(mi);
+  if (phase == G_PLAYING && alive && !taskActive()) taskTryStart(uid);
+}
+
 void gameUpdate() {
   // HOME: quick tap = emergency meeting; hold = dev debug screen.
   bool homeHeld = isButtonHeld(BTN_HOME);
@@ -471,6 +509,21 @@ void gameUpdate() {
     return;
   }
   if (homeTapped && phase == G_PLAYING) callMeeting();  // tap HOME -> meeting
+
+  // ---- task minigame overlay (local, during play only) ----
+  if (taskActive()) {
+    if (phase != G_PLAYING) { taskCancel(); needRedraw = true; }
+    else {
+      taskUpdate();
+      int jc = taskJustCompleted();
+      if (jc >= 0 && myRole == ROLE_CREW) {   // only crew tasks count
+        if (isHost) hostTaskDone();
+        else { char m[16]; snprintf(m, sizeof(m), "TDONE:%s", myId()); req(m); }
+      }
+      if (taskActive()) return;   // minigame owns the screen
+      needRedraw = true;          // finished/cancelled -> back to HUD
+    }
+  }
 
   // ---- input ----
   switch (phase) {
@@ -527,6 +580,7 @@ void gameUpdate() {
           int mi = rosterIndexOfId(myId());
           bool alive = (mi < 0) || aliveIdx(mi);
           showHUD(alive, aliveCount(), c.r, c.g, c.b);      // color only
+          drawTaskBar(taskTotal > 0 ? taskDone * 100 / taskTotal : 0);
         }
       }
       break;

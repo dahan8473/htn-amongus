@@ -10,6 +10,7 @@
 #include "players.h"
 #include "game.h"
 #include "espnow_prox.h"
+#include "tasks.h"
 
 unsigned long lastPresence = 0;
 unsigned long lastProxDebug = 0;
@@ -25,6 +26,7 @@ void setup() {
   setupButtons();
   setupPlayers();
   setupGame();
+  setupTasks();
   setupProximity(myId());  // ESP-NOW ranging for kills / body reports
 
   powerDownNFC();  // NFC starts off to save power
@@ -55,16 +57,15 @@ void loop() {
     }
   }
 
-  // AUX1 maintained switch toggles the NFC reader for task stickers
-  bool sw = isButtonHeld(BTN_AUX1);
-  if (sw != nfcEnabled) {
-    nfcEnabled = sw;
-    if (nfcEnabled) { beginNFCScan(); Serial.println("NFC ON"); }
-    else { powerDownNFC(); Serial.println("NFC OFF"); }
+  // NFC on only while playing, so crew can scan task tags (off elsewhere saves power)
+  bool wantNfc = (gamePhase() == G_PLAYING);
+  if (wantNfc != nfcEnabled) {
+    nfcEnabled = wantNfc;
+    if (nfcEnabled) beginNFCScan(); else powerDownNFC();
   }
   if (nfcEnabled) {
     String uid = scanNFC();
-    if (uid != "") { Serial.print("Task UID: "); Serial.println(uid); }
+    if (uid != "") gameOnNfc(uid.c_str());  // start the tag's task minigame
   }
 
   updateProximity();  // send the next ESP-NOW proximity beacon when due
