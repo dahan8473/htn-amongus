@@ -30,6 +30,8 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
 void setupEspNowRadio() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+  WiFi.setSleep(false);               // stay awake for RX -- ESP-NOW has no beacon to time sleep against
+  esp_wifi_set_max_tx_power(84);      // max allowed (20.5 dBm, quarter-dBm units) -- default may be lower
   esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
 
   if (esp_now_init() != ESP_OK) {
