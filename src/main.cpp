@@ -2,15 +2,17 @@
 #include "leds.h"
 #include "display.h"
 #include "imu.h"
+#include "wifi.h"
 
 unsigned long lastDisplayUpdate = 0;
 
 void setup() {
   Serial.begin(115200);
-  
+
   setupLEDs();
   setupDisplay();
-  
+  setupWiFi();
+
   if (!setupIMU()) {
     Serial.println("SC7A20 IMU not found at 0x19!");
     // You could flash the LEDs red here to indicate hardware failure
