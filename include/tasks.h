@@ -21,3 +21,8 @@ int taskJustCompleted();              // task index finished this frame, else -1
 // Test harness only: force-launch minigame `t` (0..NUM_TASKS-1), ignoring the
 // NFC mapping and the done flag so it can be replayed.
 void taskStartIndex(int t);
+
+// Tag pairing (test-harness ASSIGN screen). assignTag binds a scanned UID to a
+// game and saves it to flash; tagForGame returns the UID bound to a game ("" if none).
+void assignTag(int game, const char *uid);
+const char *tagForGame(int game);

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <esp_random.h>
 #include <string.h>
+#include <Preferences.h>
 #include "tasks.h"
 #include "buttons.h"
 #include "imu.h"
@@ -37,10 +38,13 @@ static unsigned long ddrLastSpawn;
 
 static uint16_t NAVY, WHITE, GREEN, RED, YELLOW, DIM;
 
+static void loadTagMap();
+
 void setupTasks() {
   NAVY = gfxColor(10, 12, 34); WHITE = gfxColor(255, 255, 255);
   GREEN = gfxColor(70, 210, 90); RED = gfxColor(220, 60, 60);
   YELLOW = gfxColor(240, 220, 60); DIM = gfxColor(150, 150, 170);
+  loadTagMap();
   resetTasks();
 }
 
@@ -64,12 +68,47 @@ static const TagMap TAG_MAP[] = {
   { "", 3 },  // -> Rhythm
 };
 
+// Runtime pairings set on-device via the test-harness ASSIGN screen and saved to
+// flash (NVS), so they survive reboots and reflashes.
+static char tagUid[NUM_TASKS][22];
+static Preferences tagPrefs;
+
+static void loadTagMap() {
+  tagPrefs.begin("tags", true);
+  for (int i = 0; i < NUM_TASKS; i++) {
+    char key[4]; snprintf(key, sizeof(key), "g%d", i);
+    String v = tagPrefs.getString(key, "");
+    strncpy(tagUid[i], v.c_str(), sizeof(tagUid[i]) - 1);
+    tagUid[i][sizeof(tagUid[i]) - 1] = 0;
+  }
+  tagPrefs.end();
+}
+
+void assignTag(int game, const char *uid) {
+  if (game < 0 || game >= NUM_TASKS) return;
+  for (int i = 0; i < NUM_TASKS; i++)                     // a tag maps to one game
+    if (i != game && strcmp(tagUid[i], uid) == 0) tagUid[i][0] = 0;
+  strncpy(tagUid[game], uid, sizeof(tagUid[game]) - 1);
+  tagUid[game][sizeof(tagUid[game]) - 1] = 0;
+  tagPrefs.begin("tags", false);
+  for (int i = 0; i < NUM_TASKS; i++) {
+    char key[4]; snprintf(key, sizeof(key), "g%d", i);
+    tagPrefs.putString(key, tagUid[i]);
+  }
+  tagPrefs.end();
+}
+
+const char *tagForGame(int game) {
+  return (game >= 0 && game < NUM_TASKS) ? tagUid[game] : "";
+}
+
 static int uidToTask(const char *uid) {
   if (FORCE_TASK >= 0) return FORCE_TASK;
-  for (unsigned i = 0; i < sizeof(TAG_MAP) / sizeof(TAG_MAP[0]); i++) {
+  for (int i = 0; i < NUM_TASKS; i++)                     // saved pairings win
+    if (tagUid[i][0] && strcmp(tagUid[i], uid) == 0) return i;
+  for (unsigned i = 0; i < sizeof(TAG_MAP) / sizeof(TAG_MAP[0]); i++)
     if (TAG_MAP[i].uid[0] && strcmp(TAG_MAP[i].uid, uid) == 0) return TAG_MAP[i].task;
-  }
-  uint32_t h = 0;                       // unknown tag: still open *a* game
+  uint32_t h = 0;                                         // unknown: still open *a* game
   for (const char *p = uid; *p; p++) h = h * 131u + (uint8_t)*p;
   return h % NUM_TASKS;
 }
