@@ -118,3 +118,28 @@ void showMeetingCountdown(int secondsLeft) {
 void clearScreen() {
   tft.fillScreen(ST77XX_BLACK);
 }
+
+void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor) {
+  uint16_t bg = isImpostor ? tft.color565(40, 0, 0) : tft.color565(0, 10, 30);
+  uint16_t banner = isImpostor ? C_RED : tft.color565(40, 90, 220);
+  tft.fillScreen(bg);
+
+  // crewmate in the player's own profile color
+  drawCrewmate(80, 128, tft.color565(colorR, colorG, colorB));
+
+  // role banner on the right
+  tft.fillRoundRect(150, 70, 158, 46, 8, banner);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(3);
+  if (isImpostor) {
+    tft.setCursor(160, 82);
+    tft.print("IMPOSTOR");
+  } else {
+    tft.setCursor(160, 82);
+    tft.print("CREW");
+  }
+  tft.setTextColor(ST77XX_WHITE, bg);
+  tft.setTextSize(2);
+  tft.setCursor(150, 140);
+  tft.print(isImpostor ? "Sabotage & kill" : "Do your tasks");
+}

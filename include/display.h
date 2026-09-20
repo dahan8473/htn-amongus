@@ -10,3 +10,7 @@ void showMeetingScreen();
 void showMeetingWaiting();
 void showMeetingCountdown(int secondsLeft);
 void clearScreen();
+
+// Role reveal card: a crewmate in the player's color, with CREWMATE (blue) or
+// IMPOSTOR (red) banner. r/g/b is the player's profile color.
+void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor);

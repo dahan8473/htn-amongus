@@ -8,8 +8,11 @@
 #include "buttons.h"
 #include "meeting.h"
 #include "nfc.h"
+#include "players.h"
+#include "roles.h"
 
 unsigned long lastDisplayUpdate = 0;
+unsigned long lastPresence = 0;
 bool nfcEnabled = false;
 
 void setup() {
@@ -20,72 +23,80 @@ void setup() {
   setupWiFi();
   setupBroadcast();
   setupButtons();
+  setupPlayers();
+  setupRoles();
 
-  // Start with NFC powered down to conserve energy
-  powerDownNFC();
+  powerDownNFC();  // start with NFC off to save power
 
   if (!setupIMU()) {
     Serial.println("SC7A20 IMU not found at 0x19!");
-    // You could flash the LEDs red here to indicate hardware failure
   }
 }
 
 void loop() {
-  // LEDs + buttons every loop. updateLEDs() shows a red flash while one is
-  // active (e.g. during a meeting) and the rainbow otherwise.
   updateLEDs();
   updateButtons();
 
-  // Emergency meeting: START calls it; during a meeting A starts the timer
-  // (everyone's here) and B ends it early.
-  if (isButtonPressed(BTN_START)) {
-    triggerEmergencyMeeting();
+  // announce ourselves ~1/sec so everyone builds the roster
+  if (millis() - lastPresence > 1000) {
+    lastPresence = millis();
+    sendPresence();
   }
-  if (isButtonPressed(BTN_A) && isMeetingGathering()) {
-    confirmEveryoneHere();
+
+  // ---- controls ----
+  if (isButtonPressed(BTN_START)) {
+    if (gamePhase() == PHASE_LOBBY) {
+      startGameAsHost();          // in the lobby, START begins the game
+    } else {
+      triggerEmergencyMeeting();  // in game, START calls a meeting
+    }
+  }
+  if (isButtonPressed(BTN_A)) {
+    if (isMeetingGathering()) confirmEveryoneHere();  // everyone's here -> timer
+    else if (gamePhase() == PHASE_PLAY) requestRoleReveal();  // peek role card
   }
   if (isButtonPressed(BTN_B) && isMeetingActive()) {
     endMeetingEarly();
   }
 
-  // Receive broadcasts from other badges and dispatch by message type.
-  char msg[32];
+  // ---- receive broadcasts and dispatch ----
+  char msg[48];
   if (pollMessage(msg, sizeof(msg)) > 0) {
-    if (strcmp(msg, MEETING_MSG) == 0) startMeeting();
-    else if (strcmp(msg, DISCUSS_MSG) == 0) beginDiscussion();
-    else if (strcmp(msg, ENDMTG_MSG) == 0) endMeeting();
-  }
-
-  // AUX1 maintained switch toggles the NFC reader on/off.
-  bool currentSwitchState = isButtonHeld(BTN_AUX1);
-  if (currentSwitchState != nfcEnabled) {
-    nfcEnabled = currentSwitchState;
-    if (nfcEnabled) {
-      beginNFCScan();
-      Serial.println("NFC Powered ON");
+    if (strncmp(msg, "ID:", 3) == 0) {
+      char id[ID_LEN]; int colorIdx = 0;
+      if (sscanf(msg, "ID:%4[^:]:%d", id, &colorIdx) == 2) notePresence(id, colorIdx);
+    } else if (strcmp(msg, MEETING_MSG) == 0) {
+      startMeeting();
+    } else if (strcmp(msg, DISCUSS_MSG) == 0) {
+      beginDiscussion();
+    } else if (strcmp(msg, ENDMTG_MSG) == 0) {
+      endMeeting();
     } else {
-      powerDownNFC();
-      Serial.println("NFC Powered OFF");
+      handleGameMessage(msg);  // ROLE:/PLAY/ENDGAME
     }
   }
 
-  // When NFC is on, poll for task-completion stickers.
+  // NFC toggle via the AUX1 maintained switch
+  bool sw = isButtonHeld(BTN_AUX1);
+  if (sw != nfcEnabled) {
+    nfcEnabled = sw;
+    if (nfcEnabled) { beginNFCScan(); Serial.println("NFC ON"); }
+    else { powerDownNFC(); Serial.println("NFC OFF"); }
+  }
   if (nfcEnabled) {
     String uid = scanNFC();
-    if (uid != "") {
-      Serial.print("Task Completed! Scanned UID: ");
-      Serial.println(uid);
-      // Hint: broadcast the UID here later to score tasks over WiFi.
-    }
+    if (uid != "") { Serial.print("Task UID: "); Serial.println(uid); }
   }
 
-  // Display: a meeting owns the screen; otherwise show the tilt + NFC view.
+  // ---- screen ownership: meeting > role reveal > tilt view ----
+  updateRoles();  // manages the role-card reveal window
   if (isMeetingActive()) {
     updateMeeting();
+  } else if (isRevealing()) {
+    // role card is on screen; nothing else to draw
   } else if (millis() - lastDisplayUpdate > 100) {
     lastDisplayUpdate = millis();
-    float x_angle = 0;
-    float y_angle = 0;
+    float x_angle = 0, y_angle = 0;
     getRollPitch(x_angle, y_angle);
     updateDisplay(x_angle, y_angle, nfcEnabled);
   }
