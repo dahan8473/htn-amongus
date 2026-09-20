@@ -2,7 +2,7 @@
 #include "leds.h"
 #include "display.h"
 #include "imu.h"
-#include "wifi.h"
+#include "wifi_sta.h"
 
 unsigned long lastDisplayUpdate = 0;
 

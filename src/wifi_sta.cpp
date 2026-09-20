@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include "wifi.h"
+#include "wifi_sta.h"
 #include "wifi_credentials.h"
 
 static void onWiFiEvent(WiFiEvent_t event) {
