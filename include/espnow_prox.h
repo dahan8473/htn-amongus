@@ -14,3 +14,9 @@ int proximityRssi(const char *id);
 // Print the currently tracked badge IDs and smoothed RSSI values to Serial.
 // Intended for low-rate diagnostics while tuning proximity thresholds.
 void debugProximity();
+
+// Game message bus over the same ESP-NOW broadcast. espnowSendMsg broadcasts a
+// short string to every other badge; espnowPollMsg copies one received string
+// into out (NUL-terminated) and returns its length, or 0 if none are waiting.
+void espnowSendMsg(const char *msg);
+int  espnowPollMsg(char *out, int maxLen);

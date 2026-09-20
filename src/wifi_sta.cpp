@@ -1,32 +1,21 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include "wifi_sta.h"
-#include "wifi_credentials.h"
 
-static void onWiFiEvent(WiFiEvent_t event) {
-  switch (event) {
-    case ARDUINO_EVENT_WIFI_STA_START:
-      WiFi.setSleep(false); // stay awake between beacons so game-message latency stays low
-      break;
-    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      Serial.println("WiFi disconnected, retrying");
-      WiFi.reconnect();
-      break;
-    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-      Serial.print("WiFi connected, IP=");
-      Serial.println(WiFi.localIP());
-      break;
-    default:
-      break;
-  }
-}
+// ESP-NOW needs no router. We only put the radio in station mode on a FIXED
+// channel (every badge must agree) and never associate to an AP. This removes
+// the dependency on the "imposter" network entirely -- no creds, no connect
+// retries, no hang when the AP is down.
+#define ESPNOW_CHANNEL 1
 
 void setupWiFi() {
-  WiFi.onEvent(onWiFiEvent);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  WiFi.disconnect();        // make sure we're not associated to anything
+  WiFi.setSleep(false);     // keep the radio awake so ESP-NOW latency stays low
+  esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
 }
 
 bool isWiFiConnected() {
-  return WiFi.status() == WL_CONNECTED;
+  return true;  // the ESP-NOW bus is always "up" once the radio is in STA mode
 }

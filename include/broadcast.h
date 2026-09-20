@@ -1,11 +1,10 @@
 #pragma once
 
-// WiFi UDP broadcast transport: every badge on the game network can send a
-// short tagged message that all the others (and itself) receive. This is the
-// pipe the game rides on -- no laptop or broker in the middle.
+// ESP-NOW broadcast transport: every badge can send a short tagged message that
+// all the others receive (peer-to-peer, no router/AP or broker in the middle).
 void setupBroadcast();
 
-// Send a message string to every badge on the subnet.
+// Broadcast a message string to every other badge over ESP-NOW.
 void broadcastMessage(const char *msg);
 
 // Non-blocking receive. Copies one waiting message into buf (NUL-terminated)

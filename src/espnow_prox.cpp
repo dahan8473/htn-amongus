@@ -9,6 +9,22 @@
 #define PROX_STALE_MS           3000
 #define PROX_BEACON_INTERVAL_MS 200
 
+// First byte of every ESP-NOW frame tells proximity beacons and game messages
+// apart, so both can share the one broadcast + one receive callback.
+#define NET_T_PROX 0x01
+#define NET_T_MSG  0x02
+
+// Received game messages wait here until the main loop polls them.
+#define MSGQ_N   10
+#define MSGQ_LEN 64
+static char msgq[MSGQ_N][MSGQ_LEN];
+static int msgHead = 0, msgTail = 0;
+static portMUX_TYPE msgMux = portMUX_INITIALIZER_UNLOCKED;
+
+static const uint8_t BCAST_MAC[ESP_NOW_ETH_ALEN] = {
+  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+};
+
 struct ProxBeacon {
   char id[5];
 };
@@ -56,14 +72,31 @@ static void record(const char *id, int rssi) {
 
 static void onReceive(const esp_now_recv_info_t *info,
                       const uint8_t *data, int len) {
-  if (!info || !info->rx_ctrl || len != (int)sizeof(ProxBeacon)) return;
+  if (!info || len < 1) return;
 
-  ProxBeacon beacon;
-  memcpy(&beacon, data, sizeof(beacon));
-  beacon.id[sizeof(beacon.id) - 1] = '\0';
-  if (strlen(beacon.id) != 4) return;
+  if (data[0] == NET_T_PROX) {
+    if (!info->rx_ctrl || len != 1 + (int)sizeof(ProxBeacon)) return;
+    ProxBeacon beacon;
+    memcpy(&beacon, data + 1, sizeof(beacon));
+    beacon.id[sizeof(beacon.id) - 1] = '\0';
+    if (strlen(beacon.id) != 4) return;
+    record(beacon.id, info->rx_ctrl->rssi);
+    return;
+  }
 
-  record(beacon.id, info->rx_ctrl->rssi);
+  if (data[0] == NET_T_MSG) {
+    int n = len - 1;
+    if (n <= 0) return;
+    if (n > MSGQ_LEN - 1) n = MSGQ_LEN - 1;
+    portENTER_CRITICAL(&msgMux);
+    int next = (msgHead + 1) % MSGQ_N;
+    if (next != msgTail) {             // drop if the queue is full
+      memcpy(msgq[msgHead], data + 1, n);
+      msgq[msgHead][n] = '\0';
+      msgHead = next;
+    }
+    portEXIT_CRITICAL(&msgMux);
+  }
 }
 
 void setupProximity(const char *myId) {
@@ -82,7 +115,7 @@ void setupProximity(const char *myId) {
 
   esp_now_peer_info_t peer = {};
   memset(peer.peer_addr, 0xFF, ESP_NOW_ETH_ALEN);
-  peer.channel = 0;  // follow the channel selected by the connected Wi-Fi AP
+  peer.channel = 0;  // 0 = use the radio's current (fixed) channel, set in setupWiFi
   peer.ifidx = WIFI_IF_STA;
   peer.encrypt = false;
   esp_err_t addResult = esp_now_add_peer(&peer);
@@ -97,18 +130,39 @@ void setupProximity(const char *myId) {
 }
 
 void updateProximity() {
-  if (!espNowReady || WiFi.status() != WL_CONNECTED) return;
+  if (!espNowReady) return;
   unsigned long now = millis();
   if (now - lastBeaconMs < PROX_BEACON_INTERVAL_MS) return;
   lastBeaconMs = now;
 
+  uint8_t buf[1 + sizeof(ProxBeacon)] = {0};
+  buf[0] = NET_T_PROX;
   ProxBeacon beacon = {};
   strncpy(beacon.id, ownId, sizeof(beacon.id));
-  static const uint8_t broadcastMac[ESP_NOW_ETH_ALEN] = {
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-  };
-  esp_now_send(broadcastMac,
-               reinterpret_cast<const uint8_t *>(&beacon), sizeof(beacon));
+  memcpy(buf + 1, &beacon, sizeof(beacon));
+  esp_now_send(BCAST_MAC, buf, sizeof(buf));
+}
+
+// ---- game message bus (rides the same ESP-NOW broadcast) ----
+
+void espnowSendMsg(const char *msg) {
+  if (!espNowReady) return;
+  int n = strlen(msg);
+  if (n > MSGQ_LEN - 1) n = MSGQ_LEN - 1;
+  uint8_t buf[1 + MSGQ_LEN];
+  buf[0] = NET_T_MSG;
+  memcpy(buf + 1, msg, n);
+  esp_now_send(BCAST_MAC, buf, 1 + n);
+}
+
+int espnowPollMsg(char *out, int maxLen) {
+  portENTER_CRITICAL(&msgMux);
+  if (msgTail == msgHead) { portEXIT_CRITICAL(&msgMux); return 0; }
+  strncpy(out, msgq[msgTail], maxLen - 1);
+  out[maxLen - 1] = '\0';
+  msgTail = (msgTail + 1) % MSGQ_N;
+  portEXIT_CRITICAL(&msgMux);
+  return strlen(out);
 }
 
 int proximityRssi(const char *id) {

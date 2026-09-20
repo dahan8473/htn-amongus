@@ -1,9 +1,9 @@
 #pragma once
 
-// Brings up WiFi station mode and starts connecting to the router, using
-// credentials from wifi_credentials.h (gitignored -- see
-// wifi_credentials.h.example). Connection itself continues asynchronously
-// via a registered event handler that auto-retries on drop.
+// Puts the radio in station mode on a fixed channel for ESP-NOW. Does NOT
+// connect to any router -- the badges talk peer-to-peer, so no credentials or
+// access point are needed.
 void setupWiFi();
 
+// Always true now (kept for API compatibility): the ESP-NOW bus needs no AP.
 bool isWiFiConnected();
