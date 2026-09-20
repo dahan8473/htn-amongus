@@ -17,7 +17,15 @@ static int justCompleted = -1;
 
 // per-minigame state
 static int seq[6], seqPos, wireRound;      // 0: wires (multiple sequences)
-static int shakeFill; static unsigned long lastShake;  // 1: shake
+// 1: window cleaning -- wipe the badge like a sponge; harder wipe = faster squeegee + faster clean
+#define WIN_NCOLS 14
+#define WIN_GMAX  3.0f
+static float winGrime[WIN_NCOLS];   // remaining grime per column (0..WIN_GMAX)
+static int   winShade[WIN_NCOLS];   // last-drawn shade per column (so we only repaint on change)
+static float winSqX, winPrevSqX;    // squeegee left edge, px
+static int   winSqDir;              // +1 / -1
+static float winWipeSm;            // smoothed wipe force
+static int   winPct;               // last-drawn percent
 static float navX, navY, navVX, navVY, navPX, navPY;   // 2: navigate (tilt-roll)
 static int navTX, navTY, navHits;
 static int calRound; static float calPos, calDir, calZoneL, calZoneW;  // 3: calibrate
@@ -37,8 +45,8 @@ void resetTasks() {
 }
 
 // -1 = normal (map each tag by hash). 0-3 = TEST: every tag launches this game.
-// Set to 0 to make any tag open Wires for single-tag testing.
-#define FORCE_TASK 2
+// 0 Wires, 1 Window wipe, 2 Garbage, 3 Calibrate.
+#define FORCE_TASK 1
 
 static int uidToTask(const char *uid) {
   if (FORCE_TASK >= 0) return FORCE_TASK;
@@ -56,7 +64,10 @@ static void enterTask(int t) {
   taskStart = millis();
   justCompleted = -1;
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
-  else if (t == 1) { shakeFill = 0; lastShake = 0; }
+  else if (t == 1) {
+    for (int i = 0; i < WIN_NCOLS; i++) { winGrime[i] = WIN_GMAX; winShade[i] = -1; }
+    winSqX = winPrevSqX = 20; winSqDir = 1; winWipeSm = 0; winPct = -1;
+  }
   else if (t == 2) {
     navX = navPX = 55; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
     genWalls();
@@ -135,14 +146,107 @@ static void runWires() {
   }
 }
 
-static void runShake() {
-  if (!drewStatic) { gfxClear(NAVY); gfxText(50, 20, 3, WHITE, "SHAKE IT!"); drewStatic = true; }
+// ---- window cleaning: hold the badge like a sponge and wipe the air ----
+// The squeegee ping-pongs across the glass; the harder you wipe (accel force),
+// the faster it sweeps AND the faster it wipes grime off the panes under it.
+// Grime clears in shades so you literally see where you've wiped. Done at 85%.
+#define WX     20
+#define WY     44
+#define WW     280
+#define WH     150
+#define WCOLW  (WW / WIN_NCOLS)   // 20 px
+#define WSQW   24
+
+static uint16_t grimeColor(int shade) {
+  switch (shade) {
+    case 3: return gfxColor(74, 66, 40);      // caked grime
+    case 2: return gfxColor(120, 110, 70);
+    case 1: return gfxColor(170, 165, 130);   // filmy
+    default: return gfxColor(150, 205, 235);  // 0 = clear glass
+  }
+}
+
+static int grimeShade(float g) {
+  int s = (int)floorf((g / WIN_GMAX) * 3.0f + 0.5f);
+  if (s < 0) s = 0;
+  if (s > 3) s = 3;
+  return s;
+}
+
+static void runWindow() {
+  if (!drewStatic) {
+    gfxClear(NAVY);
+    gfxText(48, 12, 3, WHITE, "WINDOW WIPE");
+    gfxRectOutline(WX - 3, WY - 3, WW + 6, WH + 6, gfxColor(90, 90, 110));
+    for (int c = 0; c < WIN_NCOLS; c++) {
+      int s = grimeShade(winGrime[c]);
+      gfxFillRect(WX + c * WCOLW, WY, WCOLW, WH, grimeColor(s));
+      winShade[c] = s;
+    }
+    gfxRectOutline(30, 208, 260, 18, WHITE);
+    drewStatic = true;
+  }
+
+  // wipe force: accel magnitude is ~1.0 at rest, spikes when you wave the badge
   float mag = getAccelMagnitude();
-  if (mag > 1.8f && millis() - lastShake > 140) { shakeFill++; lastShake = millis(); }
-  if (shakeFill >= 16) { finish(); return; }
-  gfxFillRect(30, 110, 260, 30, gfxColor(40, 40, 60));
-  gfxFillRect(30, 110, 260 * shakeFill / 16, 30, GREEN);
-  gfxRectOutline(30, 110, 260, 30, WHITE);
+  float wipe = fabsf(mag - 1.0f);
+  winWipeSm = winWipeSm * 0.6f + wipe * 0.4f;
+
+  // squeegee sweeps; speed scales with how hard you're wiping (creeps when still)
+  winSqX += winSqDir * (0.4f + winWipeSm * 26.0f);
+  if (winSqX <= WX) { winSqX = WX; winSqDir = 1; }
+  if (winSqX >= WX + WW - WSQW) { winSqX = WX + WW - WSQW; winSqDir = -1; }
+
+  // wipe grime off the columns under the squeegee, scaled by force
+  int c0 = (int)((winSqX - WX) / WCOLW);
+  int c1 = (int)((winSqX + WSQW - WX) / WCOLW);
+  if (c0 < 0) c0 = 0;
+  if (c1 > WIN_NCOLS - 1) c1 = WIN_NCOLS - 1;
+  if (winWipeSm > 0.22f) {
+    for (int c = c0; c <= c1; c++) {
+      if (winGrime[c] > 0) {
+        winGrime[c] -= winWipeSm * 0.9f;
+        if (winGrime[c] < 0) winGrime[c] = 0;
+      }
+    }
+  }
+
+  // repaint any column whose shade changed -- this is the visible "wiped" trail
+  for (int c = 0; c < WIN_NCOLS; c++) {
+    int s = grimeShade(winGrime[c]);
+    if (s != winShade[c]) {
+      if (s == 0 && winShade[c] != 0) flashLEDs(0, 170, 0, 100);  // a pane came fully clean
+      gfxFillRect(WX + c * WCOLW, WY, WCOLW, WH, grimeColor(s));
+      winShade[c] = s;
+    }
+  }
+
+  // erase old squeegee (repaint its columns at their current grime), draw new
+  int pc0 = (int)((winPrevSqX - WX) / WCOLW);
+  int pc1 = (int)((winPrevSqX + WSQW - WX) / WCOLW);
+  if (pc0 < 0) pc0 = 0;
+  if (pc1 > WIN_NCOLS - 1) pc1 = WIN_NCOLS - 1;
+  for (int c = pc0; c <= pc1; c++)
+    gfxFillRect(WX + c * WCOLW, WY, WCOLW, WH, grimeColor(winShade[c]));
+
+  gfxFillRect((int)winSqX, WY, WSQW, WH, gfxColor(210, 225, 245));            // blade body
+  gfxFillRect((int)winSqX, WY, WSQW, 8, gfxColor(240, 210, 70));             // handle
+  gfxFillRect((int)winSqX, WY + WH - 6, WSQW, 6, gfxColor(70, 80, 100));     // rubber
+  winPrevSqX = winSqX;
+
+  // progress
+  float sum = 0;
+  for (int c = 0; c < WIN_NCOLS; c++) sum += winGrime[c];
+  int pct = (int)((WIN_NCOLS * WIN_GMAX - sum) / (WIN_NCOLS * WIN_GMAX) * 100.0f);
+  if (pct != winPct) {
+    winPct = pct;
+    gfxFillRect(31, 209, 258, 16, gfxColor(40, 40, 60));
+    gfxFillRect(31, 209, 258 * pct / 100, 16, GREEN);
+    gfxFillRect(250, 12, 70, 20, NAVY);
+    char b[8]; snprintf(b, sizeof(b), "%d%%", pct);
+    gfxText(250, 12, 2, WHITE, b);
+  }
+  if (pct >= 85) { flashLEDs(0, 220, 0, 400); finish(); return; }
 }
 
 // walls the trash must navigate around (randomized each attempt)
@@ -253,7 +357,7 @@ void taskUpdate() {
   if (millis() - taskStart > TASK_TIMEOUT_MS) { taskCancel(); return; }
   switch (curTask) {
     case 0: runWires(); break;
-    case 1: runShake(); break;
+    case 1: runWindow(); break;
     case 2: runGarbage(); break;
     case 3: runCalibrate(); break;
   }
