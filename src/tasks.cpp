@@ -48,6 +48,7 @@ static int uidToTask(const char *uid) {
 }
 
 static void newChute();  // defined with the garbage minigame below
+static void genWalls();
 
 static void enterTask(int t) {
   curTask = t;
@@ -57,7 +58,8 @@ static void enterTask(int t) {
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) { shakeFill = 0; lastShake = 0; }
   else if (t == 2) {
-    navX = navPX = 60; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
+    navX = navPX = 55; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
+    genWalls();
     newChute();
   }
   else if (t == 3) { calRound = 0; calPos = 0; calDir = 2.2f; calZoneL = 62; calZoneW = 26; }
@@ -143,15 +145,30 @@ static void runShake() {
   gfxRectOutline(30, 110, 260, 30, WHITE);
 }
 
-// walls the trash must navigate around
+// walls the trash must navigate around (randomized each attempt)
 struct Wall { int x, y, w, h; };
-static const Wall WALLS[] = { { 10, 96, 120, 14 }, { 190, 150, 120, 14 }, { 150, 44, 14, 74 } };
-static const int NWALLS = 3;
+#define NWALLS 3
 #define BALL_R 8
+static Wall walls[NWALLS];
+
+static void genWalls() {
+  for (int i = 0; i < NWALLS; i++) {
+    for (int tries = 0; tries < 12; tries++) {
+      bool horiz = esp_random() % 2;
+      int w = horiz ? (80 + esp_random() % 60) : 14;
+      int h = horiz ? 14 : (50 + esp_random() % 50);
+      int x = 15 + esp_random() % (306 - w - 15);
+      int y = 52 + esp_random() % (196 - h - 52);
+      if (x < 100 && y > 150) continue;  // keep the ball's start corner clear
+      walls[i] = { x, y, w, h };
+      break;
+    }
+  }
+}
 
 static bool hitsWall(float x, float y) {
   for (int i = 0; i < NWALLS; i++) {
-    const Wall &w = WALLS[i];
+    const Wall &w = walls[i];
     if (x + BALL_R > w.x && x - BALL_R < w.x + w.w &&
         y + BALL_R > w.y && y - BALL_R < w.y + w.h) return true;
   }
@@ -197,7 +214,7 @@ static void runGarbage() {
   }
 
   gfxFillCircle((int)navPX, (int)navPY, 9, NAVY);          // erase old trash
-  for (int i = 0; i < NWALLS; i++) gfxFillRect(WALLS[i].x, WALLS[i].y, WALLS[i].w, WALLS[i].h, gfxColor(110, 110, 125));
+  for (int i = 0; i < NWALLS; i++) gfxFillRect(walls[i].x, walls[i].y, walls[i].w, walls[i].h, gfxColor(110, 110, 125));
   gfxFillRect(navTX - 14, navTY - 14, 28, 28, gfxColor(30, 120, 40));  // chute
   gfxRectOutline(navTX - 14, navTY - 14, 28, 28, GREEN);
   gfxFillCircle((int)navX, (int)navY, BALL_R, gfxColor(150, 120, 80));  // trash
