@@ -23,9 +23,8 @@ static int seq[6], seqPos, wireRound;      // 0: wires (multiple sequences)
 static float winGrime[WIN_NCOLS];   // remaining grime per column (0..WIN_GMAX)
 static int   winShade[WIN_NCOLS];   // last-drawn shade per column (so we only repaint on change)
 static float winSqX, winPrevSqX;    // squeegee left edge, px (prev = last drawn)
-static float winWipeSm;            // smoothed wipe force (motion, gravity removed)
-static float winGx, winGy, winGz;   // gravity estimate (low-pass) for the tilt angle
-static float winAngCenter;          // fan-angle neutral, captured at task start
+static int   winSqDir;              // auto-sweep direction (+1 / -1)
+static float winWipeSm;            // smoothed shake force
 static int   winPct;               // last-drawn percent
 static float navX, navY, navVX, navVY, navPX, navPY;   // 2: navigate (tilt-roll)
 static int navTX, navTY, navHits;
@@ -67,7 +66,7 @@ static void enterTask(int t) {
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) {
     for (int i = 0; i < WIN_NCOLS; i++) { winGrime[i] = WIN_GMAX; winShade[i] = -1; }
-    winSqX = 20; winPrevSqX = -1000; winWipeSm = 0; winPct = -1;
+    winSqX = 20; winPrevSqX = -1000; winSqDir = 1; winWipeSm = 0; winPct = -1;
   }
   else if (t == 2) {
     navX = navPX = 55; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
@@ -164,9 +163,7 @@ static void runWires() {
 #define WH     150
 #define WCOLW  (WW / WIN_NCOLS)   // 20 px
 #define WSQW   28
-#define WIPE_RANGE 34.0f          // degrees from center to each edge of the fan
-#define WIPE_SIGN  1.0f           // flip to -1.0f if the squeegee fans the wrong way
-#define WIPE_FORCE 0.42f          // motion (g) you must exceed before any grime lifts
+#define WIPE_FORCE 0.42f          // shake force you must exceed before any grime lifts
 #define WIPE_SCRUB 1.05f          // how fast grime lifts once you're above WIPE_FORCE
 
 static uint16_t grimeColor(int shade) {
@@ -213,42 +210,30 @@ static void runWindow() {
   if (!drewStatic) {
     gfxClear(NAVY);
     gfxText(48, 10, 3, WHITE, "WINDOW WIPE");
-    gfxText(24, 224, 2, gfxColor(140, 140, 160), "hold upright, scrub hard");
+    gfxText(30, 224, 2, gfxColor(140, 140, 160), "shake hard to wipe");
     gfxRectOutline(WX - 3, WY - 3, WW + 6, WH + 6, gfxColor(90, 90, 110));
     for (int c = 0; c < WIN_NCOLS; c++) {
       int s = grimeShade(winGrime[c]);
       gfxFillRect(WX + c * WCOLW, WY, WCOLW, WH, grimeColor(s));
       winShade[c] = s;
     }
-    float ax, ay, az; getAccel(ax, ay, az);
-    winGx = ax; winGy = ay; winGz = az;
-    winAngCenter = atan2f(winGy, winGx) * 180.0f / PI;   // start pose = center
     winPct = -1;
     drewStatic = true;
   }
 
-  float ax = 0, ay = 0, az = 0; getAccel(ax, ay, az);
+  // shake force: accel magnitude is ~1.0 at rest, spikes when you shake it
+  float mag = getAccelMagnitude();
+  float wipe = fabsf(mag - 1.0f);
+  winWipeSm = winWipeSm * 0.5f + wipe * 0.5f;
 
-  // split the reading: gravity = low-pass (orientation), motion = the rest (wipe)
-  winGx = winGx * 0.90f + ax * 0.10f;
-  winGy = winGy * 0.90f + ay * 0.10f;
-  winGz = winGz * 0.90f + az * 0.10f;
-  float mx = ax - winGx, my = ay - winGy, mz = az - winGz;
-  float motion = sqrtf(mx * mx + my * my + mz * mz);
-  winWipeSm = winWipeSm * 0.5f + motion * 0.5f;
+  // squeegee auto-sweeps; the harder you shake, the faster it travels
+  float step = 0.3f + winWipeSm * 14.0f;
+  if (step > 24.0f) step = 24.0f;
+  winSqX += winSqDir * step;
+  if (winSqX <= WX) { winSqX = WX; winSqDir = 1; }
+  if (winSqX >= WX + WW - WSQW) { winSqX = WX + WW - WSQW; winSqDir = -1; }
 
-  // fan angle from GRAVITY only, so it stays put while you scrub hard
-  float d = atan2f(winGy, winGx) * 180.0f / PI - winAngCenter;
-  while (d > 180) d -= 360;
-  while (d < -180) d += 360;
-  d *= WIPE_SIGN;
-  float tpos = (d + WIPE_RANGE) / (2.0f * WIPE_RANGE);
-  if (tpos < 0) tpos = 0;
-  if (tpos > 1) tpos = 1;
-  float targetX = WX + tpos * (WW - WSQW);
-  winSqX += (targetX - winSqX) * 0.30f;
-
-  // scrub only above the force threshold; harder wipe lifts grime faster
+  // scrub only above the force threshold; harder shake lifts grime faster
   int c0 = (int)((winSqX - WX) / WCOLW);
   int c1 = (int)((winSqX + WSQW - WX) / WCOLW);
   if (c0 < 0) c0 = 0;
