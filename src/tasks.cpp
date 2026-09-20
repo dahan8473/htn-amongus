@@ -28,7 +28,12 @@ static unsigned long winLastHit;    // debounce timer for shake detection
 static int   winPct;               // last-drawn percent
 static float navX, navY, navVX, navVY, navPX, navPY;   // 2: navigate (tilt-roll)
 static int navTX, navTY, navHits;
-static int calRound; static float calPos, calDir, calZoneL, calZoneW;  // 3: calibrate
+// 3: rhythm (DDR) -- arrows fall in 4 lanes, hit the matching d-pad at the line
+#define DDR_MAX 8
+struct Arrow { bool on; int lane; float y, py; };
+static Arrow ddr[DDR_MAX];
+static int ddrHits, ddrShown;
+static unsigned long ddrLastSpawn;
 
 static uint16_t NAVY, WHITE, GREEN, RED, YELLOW, DIM;
 
@@ -45,7 +50,7 @@ void resetTasks() {
 }
 
 // -1 = normal (map each tag via TAG_MAP below). 0-3 = TEST: every tag launches
-// this one game. 0 Wires, 1 Window wipe, 2 Garbage, 3 Calibrate.
+// this one game. 0 Wires, 1 Window wipe, 2 Garbage, 3 Rhythm.
 #define FORCE_TASK -1
 
 // Which physical tag opens which game. Paste each tag's UID (uppercase hex, no
@@ -56,7 +61,7 @@ static const TagMap TAG_MAP[] = {
   { "", 0 },  // -> Wires
   { "", 1 },  // -> Window Wipe
   { "", 2 },  // -> Garbage
-  { "", 3 },  // -> Calibrate
+  { "", 3 },  // -> Rhythm
 };
 
 static int uidToTask(const char *uid) {
@@ -87,7 +92,7 @@ static void enterTask(int t) {
     genWalls();
     newChute();
   }
-  else if (t == 3) { calRound = 0; calPos = 0; calDir = 2.2f; calZoneL = 62; calZoneW = 26; }
+  else if (t == 3) { for (int i = 0; i < DDR_MAX; i++) ddr[i].on = false; ddrHits = 0; ddrShown = -1; ddrLastSpawn = 0; }
 }
 
 bool taskTryStart(const char *uid) {
@@ -373,26 +378,74 @@ static void runGarbage() {
   gfxText(284, 36, 2, GREEN, h);
 }
 
-static void runCalibrate() {
-  if (!drewStatic) { gfxClear(NAVY); gfxText(40, 16, 3, WHITE, "CALIBRATE"); gfxText(20, 210, 2, DIM, "A in the green zone"); drewStatic = true; }
-  calPos += calDir;
-  if (calPos <= 0) { calPos = 0; calDir = -calDir; }
-  if (calPos >= 100) { calPos = 100; calDir = -calDir; }
-  if (isButtonPressed(BTN_A)) {
-    if (calPos >= calZoneL && calPos <= calZoneL + calZoneW) {
-      calRound++;
-      if (calRound >= 3) { finish(); return; }
-      calZoneW *= 0.65f; calZoneL = 15 + esp_random() % 60;  // shrink + move
+#define DDR_LANES 4
+#define DDR_HITS  8
+#define DDR_HITY  188
+#define DDR_TOL   26
+#define DDR_SPEED 3.0f
+
+static int ddrLaneX(int l) { return 52 + l * 72; }   // 52, 124, 196, 268
+
+static void runDDR() {
+  if (!drewStatic) {
+    gfxClear(NAVY);
+    gfxText(64, 10, 3, WHITE, "RHYTHM");
+    gfxText(28, 222, 2, DIM, "hit arrows at the line");
+    drewStatic = true;
+  }
+
+  // spawn arrows on a cadence
+  if (millis() - ddrLastSpawn > 640) {
+    for (int i = 0; i < DDR_MAX; i++) if (!ddr[i].on) {
+      ddr[i].on = true; ddr[i].lane = esp_random() % DDR_LANES;
+      ddr[i].y = 22; ddr[i].py = 22;
+      break;
+    }
+    ddrLastSpawn = millis();
+  }
+
+  // input: each d-pad press hits the nearest arrow in that lane inside the zone
+  for (int d = 0; d < 4; d++) {
+    uint16_t mask = d == 0 ? BTN_UP : d == 1 ? BTN_DOWN : d == 2 ? BTN_LEFT : BTN_RIGHT;
+    if (!isButtonPressed(mask)) continue;
+    int best = -1; float bd = 1e9f;
+    for (int i = 0; i < DDR_MAX; i++)
+      if (ddr[i].on && ddr[i].lane == d) {
+        float dist = fabsf(ddr[i].y - DDR_HITY);
+        if (dist <= DDR_TOL && dist < bd) { bd = dist; best = i; }
+      }
+    if (best >= 0) {
+      gfxFillRect(ddrLaneX(d) - 14, (int)ddr[best].y - 14, 28, 28, NAVY);
+      ddr[best].on = false; ddrHits++; flashLEDs(0, 200, 0, 80);
+    } else {
+      flashLEDs(200, 0, 0, 70);   // whiffed
     }
   }
-  // bar 30..290 maps 0..100
-  int barX = 30, barW = 260;
-  gfxFillRect(barX, 110, barW, 30, gfxColor(40, 40, 60));
-  gfxFillRect(barX + (int)(barW * calZoneL / 100), 110, (int)(barW * calZoneW / 100), 30, GREEN);
-  gfxFillRect(barX + (int)(barW * calPos / 100) - 2, 104, 4, 42, WHITE);
-  gfxRectOutline(barX, 110, barW, 30, WHITE);
-  char b[16]; snprintf(b, sizeof(b), "Round %d/3", calRound + 1);
-  gfxText(110, 160, 2, DIM, b);
+
+  // erase arrows at their previous spot
+  for (int i = 0; i < DDR_MAX; i++)
+    if (ddr[i].on) gfxFillRect(ddrLaneX(ddr[i].lane) - 14, (int)ddr[i].py - 14, 28, 28, NAVY);
+
+  // redraw the dim lane targets + hit line each frame (trails erased above)
+  for (int l = 0; l < DDR_LANES; l++) drawGlyph(ddrLaneX(l), DDR_HITY, l, gfxColor(70, 70, 95));
+  gfxFillRect(18, DDR_HITY + 16, 284, 2, gfxColor(90, 90, 115));
+
+  // move + draw arrows on top
+  for (int i = 0; i < DDR_MAX; i++) if (ddr[i].on) {
+    ddr[i].y += DDR_SPEED;
+    if (ddr[i].y > DDR_HITY + DDR_TOL + 10) { ddr[i].on = false; continue; }  // missed
+    drawGlyph(ddrLaneX(ddr[i].lane), (int)ddr[i].y, ddr[i].lane, WHITE);
+    ddr[i].py = ddr[i].y;
+  }
+
+  // progress
+  if (ddrHits != ddrShown) {
+    ddrShown = ddrHits;
+    gfxFillRect(250, 10, 70, 20, NAVY);
+    char b[12]; snprintf(b, sizeof(b), "%d/%d", ddrHits, DDR_HITS);
+    gfxText(252, 12, 2, GREEN, b);
+  }
+  if (ddrHits >= DDR_HITS) { flashLEDs(0, 220, 0, 400); finish(); return; }
 }
 
 void taskUpdate() {
@@ -404,6 +457,6 @@ void taskUpdate() {
     case 0: runWires(); break;
     case 1: runWindow(); break;
     case 2: runGarbage(); break;
-    case 3: runCalibrate(); break;
+    case 3: runDDR(); break;
   }
 }

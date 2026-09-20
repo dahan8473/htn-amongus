@@ -5,7 +5,7 @@
 #include "display.h"
 #include "leds.h"
 
-static const char *TASK_NAMES[NUM_TASKS] = { "WIRES", "WINDOW WIPE", "GARBAGE", "CALIBRATE" };
+static const char *TASK_NAMES[NUM_TASKS] = { "WIRES", "WINDOW WIPE", "GARBAGE", "RHYTHM" };
 
 static int  sel = 0;
 static bool inTask = false;
