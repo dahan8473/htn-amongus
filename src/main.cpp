@@ -31,19 +31,24 @@ void loop() {
   updateLEDs();
   updateButtons();
 
-  // Press START to call an emergency meeting for everyone.
+  // START calls an emergency meeting. During a meeting: A starts the timer
+  // (once everyone's here), B ends it early.
   if (isButtonPressed(BTN_START)) {
-    Serial.println("START pressed -> calling emergency meeting");
     triggerEmergencyMeeting();
+  }
+  if (isButtonPressed(BTN_A) && isMeetingGathering()) {
+    confirmEveryoneHere();
+  }
+  if (isButtonPressed(BTN_B) && isMeetingActive()) {
+    endMeetingEarly();
   }
 
   // Receive broadcasts from other badges and dispatch by message type.
   char msg[32];
   if (pollMessage(msg, sizeof(msg)) > 0) {
-    if (strcmp(msg, MEETING_MSG) == 0) {
-      Serial.println("meeting called by another badge");
-      startMeeting();
-    }
+    if (strcmp(msg, MEETING_MSG) == 0) startMeeting();
+    else if (strcmp(msg, DISCUSS_MSG) == 0) beginDiscussion();
+    else if (strcmp(msg, ENDMTG_MSG) == 0) endMeeting();
   }
 
   if (isMeetingActive()) {
