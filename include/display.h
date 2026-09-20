@@ -12,11 +12,11 @@ void showMeetingCountdown(int secondsLeft);
 void clearScreen();
 
 // Role reveal card: a crewmate in the player's color, CREWMATE (blue) or
-// IMPOSTOR (red) banner. If impostor, small crewmate icons for each teammate
-// color are drawn on the left so you know your fellow impostors, plus a kill
+// IMPOSTER (red) banner. If imposter, small crewmate icons for each teammate
+// color are drawn on the left so you know your fellow imposters, plus a kill
 // cooldown readout (killCooldownSecs seconds remaining, or "Ready to kill"
-// at 0). killCooldownSecs is ignored when not an impostor.
-void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
+// at 0). killCooldownSecs is ignored when not an imposter.
+void showRoleCard(int colorR, int colorG, int colorB, bool isImposter,
                   int nTeam, const uint8_t *teamR, const uint8_t *teamG,
                   const uint8_t *teamB, int killCooldownSecs);
 
@@ -35,10 +35,10 @@ void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB,
 void showVote(const char *name, int colorR, int colorG, int colorB,
               bool isSkip, int secondsLeft, bool alreadyVoted);
 
-// Result of a vote: who was ejected (+ impostor reveal, or skipped), plus a
+// Result of a vote: who was ejected (+ imposter reveal, or skipped), plus a
 // tally row of mini color icons with how many votes each color got.
 void showResult(const char *ejName, int ejR, int ejG, int ejB,
-                bool skipped, bool wasImpostor,
+                bool skipped, bool wasImposter,
                 int nTally, const uint8_t *talR, const uint8_t *talG,
                 const uint8_t *talB, const int *talCounts, int skipCount);
 

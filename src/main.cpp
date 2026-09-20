@@ -91,7 +91,7 @@ void loop() {
 
   // AUX1 maintained switch: demo-mode immortality toggle. While ON, this
   // badge can't be killed or even targeted, regardless of proximity to an
-  // impostor -- synced out so the host (which validates every kill) knows.
+  // imposter -- synced out so the host (which validates every kill) knows.
   bool sw = isButtonHeld(BTN_AUX1);
   if (sw != immortal) {
     immortal = sw;

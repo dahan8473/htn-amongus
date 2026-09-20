@@ -37,7 +37,7 @@ static GPhase phase = G_LOBBY;
 static bool isHost = false;
 static unsigned long phaseEnd = 0;      // for timed phases (discuss/voting)
 static int myRole = ROLE_NONE;
-static char impTeam[MAX_PLAYERS][ID_LEN];  // my fellow impostors (if I'm one)
+static char impTeam[MAX_PLAYERS][ID_LEN];  // my fellow imposters (if I'm one)
 static int nImpTeam = 0;
 
 // hold START to peek your role card
@@ -51,7 +51,7 @@ static unsigned long homeDownAt = 0;
 static bool homePrevHeld = false;
 static bool homeIsHold = false;
 
-// hold B to kill (impostor) or report a nearby body (anyone)
+// hold B to kill (imposter) or report a nearby body (anyone)
 static unsigned long bDownAt = 0;
 static bool bActed = false;
 static unsigned long lastKillMs[MAX_PLAYERS] = { 0 };  // host kill cooldown
@@ -181,7 +181,7 @@ static void hostStartGame() {
   int chosen = 0;
 
   // Whoever starts the game (the host) is always guaranteed to be an
-  // impostor; any additional impostor slots are randomized among the rest.
+  // imposter; any additional imposter slots are randomized among the rest.
   int hostIdx = rosterIndexOfId(myId());
   if (hostIdx >= 0) { imp[hostIdx] = true; chosen++; }
 
@@ -189,7 +189,7 @@ static void hostStartGame() {
     int k = esp_random() % n;
     if (!imp[k]) { imp[k] = true; chosen++; }
   }
-  // build the impostor id list so teammates can be shown on the role card
+  // build the imposter id list so teammates can be shown on the role card
   char impCsv[128] = "";
   for (int i = 0; i < n; i++) {
     if (!imp[i]) continue;
@@ -292,7 +292,7 @@ static void hostCheckWinOrResume() {
   if (!hostCheckWin()) setPhaseHost(G_PLAYING, 0);
 }
 
-// impostor kill (validated on the host)
+// imposter kill (validated on the host)
 static void hostKill(const char *killer, const char *target) {
   if (phase != G_PLAYING) return;
   int ki = rosterIndexOfId(killer), ti = rosterIndexOfId(target);
@@ -306,7 +306,7 @@ static void hostKill(const char *killer, const char *target) {
   broadcastAlive();
   char m[16]; snprintf(m, sizeof(m), "DEAD:%s", target);
   broadcastMessage(m);
-  hostCheckWin();  // a kill can win it for the impostors
+  hostCheckWin();  // a kill can win it for the imposters
 }
 
 // body report -> meeting (validated on the host)
@@ -322,7 +322,7 @@ static void hostReport(const char *reporter) {
 // without this, that badge is stuck at ROLE_NONE for the whole round. Any
 // badge in that state keeps asking (see gameUpdate()) until the host, which
 // by then has very likely learned about it via ordinary presence beacons,
-// can fold it in. Late arrivals always join as crew: the impostor draw
+// can fold it in. Late arrivals always join as crew: the imposter draw
 // already happened, and re-drawing mid-round would be unfair/confusing.
 static void hostAssignLate(const char *id) {
   if (phase != G_PLAYING) return;
@@ -545,7 +545,7 @@ static void playingInput() {
   startPrevHeld = held;
   revealActive = startIsReveal && held;
 
-  // B: hold to kill (impostor, nearest crew in range) or report a nearby body.
+  // B: hold to kill (imposter, nearest crew in range) or report a nearby body.
   int mi = rosterIndexOfId(myId());
   bool alive = (mi < 0) || aliveIdx(mi);
 
@@ -562,7 +562,7 @@ static void playingInput() {
     bool offCooldown = millis() >= myKillCooldownUntil;
     const char *tgt = (myRole == ROLE_IMP && offCooldown) ? nearestKillTarget() : nullptr;
     if (myRole == ROLE_IMP) {
-      // holding B always restarts the cooldown, hit or miss -- an impostor
+      // holding B always restarts the cooldown, hit or miss -- an imposter
       // can't spam it to fish for a target for free.
       myKillCooldownUntil = millis() + KILL_CD_MS;
       needRedraw = true;
@@ -622,7 +622,7 @@ void setupGame() {
 // called by main when an NFC tag is scanned: start that tag's task minigame.
 // Allowed in LOBBY too so a single badge can test tasks without a full game.
 void gameOnNfc(const char *uid) {
-  if (myRole == ROLE_IMP) return;  // impostors can't do tasks at all, not even for cover
+  if (myRole == ROLE_IMP) return;  // imposters can't do tasks at all, not even for cover
   int mi = rosterIndexOfId(myId());
   bool alive = (mi < 0) || aliveIdx(mi);
   if ((phase == G_PLAYING || phase == G_LOBBY) && alive && !taskActive()) taskTryStart(uid);

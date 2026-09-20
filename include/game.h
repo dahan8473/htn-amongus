@@ -11,7 +11,7 @@ enum GPhase {
   G_GATHER,    // meeting called, blinking red, waiting for A
   G_DISCUSS,   // discussion countdown
   G_VOTING,    // pick a color, A to vote
-  G_RESULT,    // who was ejected (+ impostor reveal)
+  G_RESULT,    // who was ejected (+ imposter reveal)
   G_OVER,      // winner screen
 };
 
