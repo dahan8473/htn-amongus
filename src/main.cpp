@@ -7,8 +7,10 @@
 #include "broadcast.h"
 #include "buttons.h"
 #include "meeting.h"
+#include "nfc.h"
 
 unsigned long lastDisplayUpdate = 0;
+bool nfcEnabled = false;
 
 void setup() {
   Serial.begin(115200);
@@ -19,6 +21,9 @@ void setup() {
   setupBroadcast();
   setupButtons();
 
+  // Start with NFC powered down to conserve energy
+  powerDownNFC();
+
   if (!setupIMU()) {
     Serial.println("SC7A20 IMU not found at 0x19!");
     // You could flash the LEDs red here to indicate hardware failure
@@ -26,13 +31,13 @@ void setup() {
 }
 
 void loop() {
-  // LEDs and buttons every loop. updateLEDs() shows a red flash while one is
+  // LEDs + buttons every loop. updateLEDs() shows a red flash while one is
   // active (e.g. during a meeting) and the rainbow otherwise.
   updateLEDs();
   updateButtons();
 
-  // START calls an emergency meeting. During a meeting: A starts the timer
-  // (once everyone's here), B ends it early.
+  // Emergency meeting: START calls it; during a meeting A starts the timer
+  // (everyone's here) and B ends it early.
   if (isButtonPressed(BTN_START)) {
     triggerEmergencyMeeting();
   }
@@ -51,14 +56,37 @@ void loop() {
     else if (strcmp(msg, ENDMTG_MSG) == 0) endMeeting();
   }
 
+  // AUX1 maintained switch toggles the NFC reader on/off.
+  bool currentSwitchState = isButtonHeld(BTN_AUX1);
+  if (currentSwitchState != nfcEnabled) {
+    nfcEnabled = currentSwitchState;
+    if (nfcEnabled) {
+      beginNFCScan();
+      Serial.println("NFC Powered ON");
+    } else {
+      powerDownNFC();
+      Serial.println("NFC Powered OFF");
+    }
+  }
+
+  // When NFC is on, poll for task-completion stickers.
+  if (nfcEnabled) {
+    String uid = scanNFC();
+    if (uid != "") {
+      Serial.print("Task Completed! Scanned UID: ");
+      Serial.println(uid);
+      // Hint: broadcast the UID here later to score tasks over WiFi.
+    }
+  }
+
+  // Display: a meeting owns the screen; otherwise show the tilt + NFC view.
   if (isMeetingActive()) {
-    // Meeting owns the screen; skip the tilt view until it ends.
     updateMeeting();
   } else if (millis() - lastDisplayUpdate > 100) {
     lastDisplayUpdate = millis();
-    float roll = 0;
-    float pitch = 0;
-    getRollPitch(roll, pitch);
-    updateDisplay(roll, pitch);
+    float x_angle = 0;
+    float y_angle = 0;
+    getRollPitch(x_angle, y_angle);
+    updateDisplay(x_angle, y_angle, nfcEnabled);
   }
 }
