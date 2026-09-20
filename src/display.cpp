@@ -254,8 +254,8 @@ void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB,
 }
 
 void showGameOver(bool crewWon) {
-  tft.fillScreen(crewWon ? tft.color565(0, 20, 45) : tft.color565(40, 0, 0));
-  tft.setTextColor(crewWon ? tft.color565(70, 160, 240) : C_RED);
+  tft.fillScreen(crewWon ? tft.color565(0, 20, 45) : tft.color565(0, 35, 15));
+  tft.setTextColor(crewWon ? tft.color565(70, 160, 240) : tft.color565(70, 220, 110));
   tft.setTextSize(4);
   if (crewWon) { tft.setCursor(40, 70); tft.print("CREW"); tft.setCursor(40, 115); tft.print("WINS!"); }
   else { tft.setCursor(10, 70); tft.print("IMPOSTOR"); tft.setCursor(70, 115); tft.print("WINS"); }
