@@ -12,6 +12,7 @@
 #include "espnow_prox.h"
 
 unsigned long lastPresence = 0;
+unsigned long lastProxDebug = 0;
 bool nfcEnabled = false;
 
 void setup() {
@@ -67,6 +68,10 @@ void loop() {
   }
 
   updateProximity();  // send the next ESP-NOW proximity beacon when due
+  if (millis() - lastProxDebug > 1000) {
+    lastProxDebug = millis();
+    debugProximity();
+  }
 
   // the state machine owns input handling and all rendering
   gameUpdate();

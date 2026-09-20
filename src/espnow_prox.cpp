@@ -124,3 +124,24 @@ int proximityRssi(const char *id) {
   portEXIT_CRITICAL(&recMux);
   return result;
 }
+
+void debugProximity() {
+  Rec snapshot[PROX_MAX];
+  int count;
+  portENTER_CRITICAL(&recMux);
+  count = nRecs;
+  memcpy(snapshot, recs, sizeof(Rec) * count);
+  portEXIT_CRITICAL(&recMux);
+
+  Serial.print("PROX");
+  unsigned long now = millis();
+  for (int i = 0; i < count; i++) {
+    if (!snapshot[i].initialized) continue;
+    Serial.print(" ");
+    Serial.print(snapshot[i].id);
+    Serial.print("=");
+    if (now - snapshot[i].ms < PROX_STALE_MS) Serial.print(snapshot[i].rssi);
+    else Serial.print("stale");
+  }
+  Serial.println();
+}
