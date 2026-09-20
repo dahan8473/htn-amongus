@@ -22,8 +22,9 @@ static int seq[6], seqPos, wireRound;      // 0: wires (multiple sequences)
 #define WIN_GMAX  3.0f
 static float winGrime[WIN_NCOLS];   // remaining grime per column (0..WIN_GMAX)
 static int   winShade[WIN_NCOLS];   // last-drawn shade per column (so we only repaint on change)
-static float winSqX, winPrevSqX;    // squeegee left edge, px
-static float winWipeSm;            // smoothed wipe force
+static float winSqX, winPrevSqX;    // squeegee left edge, px (prev = last drawn)
+static float winWipeSm;            // smoothed wipe force (motion, gravity removed)
+static float winGx, winGy, winGz;   // gravity estimate (low-pass) for the tilt angle
 static float winAngCenter;          // fan-angle neutral, captured at task start
 static int   winPct;               // last-drawn percent
 static float navX, navY, navVX, navVY, navPX, navPY;   // 2: navigate (tilt-roll)
@@ -66,7 +67,7 @@ static void enterTask(int t) {
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) {
     for (int i = 0; i < WIN_NCOLS; i++) { winGrime[i] = WIN_GMAX; winShade[i] = -1; }
-    winSqX = winPrevSqX = 20; winWipeSm = 0; winPct = -1;
+    winSqX = 20; winPrevSqX = -1000; winWipeSm = 0; winPct = -1;
   }
   else if (t == 2) {
     navX = navPX = 55; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
@@ -165,6 +166,8 @@ static void runWires() {
 #define WSQW   28
 #define WIPE_RANGE 34.0f          // degrees from center to each edge of the fan
 #define WIPE_SIGN  1.0f           // flip to -1.0f if the squeegee fans the wrong way
+#define WIPE_FORCE 0.42f          // motion (g) you must exceed before any grime lifts
+#define WIPE_SCRUB 1.05f          // how fast grime lifts once you're above WIPE_FORCE
 
 static uint16_t grimeColor(int shade) {
   switch (shade) {
@@ -182,11 +185,35 @@ static int grimeShade(float g) {
   return s;
 }
 
+// repaint a glass span [x0,x1) with each column's current grime shade
+static void winRepaint(int x0, int x1) {
+  if (x0 < WX) x0 = WX;
+  if (x1 > WX + WW) x1 = WX + WW;
+  if (x1 <= x0) return;
+  int cA = (x0 - WX) / WCOLW;
+  int cB = (x1 - 1 - WX) / WCOLW;
+  for (int c = cA; c <= cB; c++) {
+    int a = WX + c * WCOLW;       if (a < x0) a = x0;
+    int b = WX + (c + 1) * WCOLW; if (b > x1) b = x1;
+    if (b > a) gfxFillRect(a, WY, b - a, WH, grimeColor(winShade[c]));
+  }
+}
+
+// draw the squeegee across a span [x0,x1)
+static void winDrawBar(int x0, int x1) {
+  if (x0 < WX) x0 = WX;
+  if (x1 > WX + WW) x1 = WX + WW;
+  if (x1 <= x0) return;
+  gfxFillRect(x0, WY, x1 - x0, WH, gfxColor(210, 225, 245));            // blade
+  gfxFillRect(x0, WY, x1 - x0, 8, gfxColor(240, 210, 70));             // handle
+  gfxFillRect(x0, WY + WH - 6, x1 - x0, 6, gfxColor(70, 80, 100));     // rubber
+}
+
 static void runWindow() {
   if (!drewStatic) {
     gfxClear(NAVY);
     gfxText(48, 10, 3, WHITE, "WINDOW WIPE");
-    gfxText(24, 224, 2, gfxColor(140, 140, 160), "hold upright, fan to wipe");
+    gfxText(24, 224, 2, gfxColor(140, 140, 160), "hold upright, scrub hard");
     gfxRectOutline(WX - 3, WY - 3, WW + 6, WH + 6, gfxColor(90, 90, 110));
     for (int c = 0; c < WIN_NCOLS; c++) {
       int s = grimeShade(winGrime[c]);
@@ -194,65 +221,78 @@ static void runWindow() {
       winShade[c] = s;
     }
     float ax, ay, az; getAccel(ax, ay, az);
-    winAngCenter = atan2f(ay, ax) * 180.0f / PI;   // wherever you start = center
+    winGx = ax; winGy = ay; winGz = az;
+    winAngCenter = atan2f(winGy, winGx) * 180.0f / PI;   // start pose = center
     winPct = -1;
     drewStatic = true;
   }
 
-  // one accel read gives both the fan angle and the wipe force
   float ax = 0, ay = 0, az = 0; getAccel(ax, ay, az);
-  float mag = sqrtf(ax * ax + ay * ay + az * az);
-  float wipe = fabsf(mag - 1.0f);
-  winWipeSm = winWipeSm * 0.55f + wipe * 0.45f;
 
-  // fan angle relative to your start -> squeegee X, low-passed to kill jitter
-  float d = atan2f(ay, ax) * 180.0f / PI - winAngCenter;
+  // split the reading: gravity = low-pass (orientation), motion = the rest (wipe)
+  winGx = winGx * 0.90f + ax * 0.10f;
+  winGy = winGy * 0.90f + ay * 0.10f;
+  winGz = winGz * 0.90f + az * 0.10f;
+  float mx = ax - winGx, my = ay - winGy, mz = az - winGz;
+  float motion = sqrtf(mx * mx + my * my + mz * mz);
+  winWipeSm = winWipeSm * 0.5f + motion * 0.5f;
+
+  // fan angle from GRAVITY only, so it stays put while you scrub hard
+  float d = atan2f(winGy, winGx) * 180.0f / PI - winAngCenter;
   while (d > 180) d -= 360;
   while (d < -180) d += 360;
   d *= WIPE_SIGN;
-  float t = (d + WIPE_RANGE) / (2.0f * WIPE_RANGE);
-  if (t < 0) t = 0;
-  if (t > 1) t = 1;
-  float targetX = WX + t * (WW - WSQW);
-  winSqX += (targetX - winSqX) * 0.35f;
+  float tpos = (d + WIPE_RANGE) / (2.0f * WIPE_RANGE);
+  if (tpos < 0) tpos = 0;
+  if (tpos > 1) tpos = 1;
+  float targetX = WX + tpos * (WW - WSQW);
+  winSqX += (targetX - winSqX) * 0.30f;
 
-  // only scrub while actually wiping (force), scaled by how hard
+  // scrub only above the force threshold; harder wipe lifts grime faster
   int c0 = (int)((winSqX - WX) / WCOLW);
   int c1 = (int)((winSqX + WSQW - WX) / WCOLW);
   if (c0 < 0) c0 = 0;
   if (c1 > WIN_NCOLS - 1) c1 = WIN_NCOLS - 1;
-  if (winWipeSm > 0.16f) {
-    float power = winWipeSm > 1.2f ? 1.2f : winWipeSm;
+  if (winWipeSm > WIPE_FORCE) {
+    float power = winWipeSm - WIPE_FORCE;
+    if (power > 1.0f) power = 1.0f;
     for (int c = c0; c <= c1; c++) {
       if (winGrime[c] > 0) {
-        winGrime[c] -= power * 0.7f;
+        winGrime[c] -= power * WIPE_SCRUB;
         if (winGrime[c] < 0) winGrime[c] = 0;
       }
     }
   }
 
-  // repaint any column whose shade changed -- the visible wiped trail
+  // track shade changes for LEDs; the actual repaint happens via the slivers
   for (int c = 0; c < WIN_NCOLS; c++) {
     int s = grimeShade(winGrime[c]);
     if (s != winShade[c]) {
       if (s == 0 && winShade[c] != 0) flashLEDs(0, 170, 0, 100);  // a pane came clean
-      gfxFillRect(WX + c * WCOLW, WY, WCOLW, WH, grimeColor(s));
       winShade[c] = s;
     }
   }
 
-  // erase old squeegee (repaint its columns), draw at new spot
-  int pc0 = (int)((winPrevSqX - WX) / WCOLW);
-  int pc1 = (int)((winPrevSqX + WSQW - WX) / WCOLW);
-  if (pc0 < 0) pc0 = 0;
-  if (pc1 > WIN_NCOLS - 1) pc1 = WIN_NCOLS - 1;
-  for (int c = pc0; c <= pc1; c++)
-    gfxFillRect(WX + c * WCOLW, WY, WCOLW, WH, grimeColor(winShade[c]));
-
-  gfxFillRect((int)winSqX, WY, WSQW, WH, gfxColor(210, 225, 245));            // blade
-  gfxFillRect((int)winSqX, WY, WSQW, 8, gfxColor(240, 210, 70));             // handle
-  gfxFillRect((int)winSqX, WY + WH - 6, WSQW, 6, gfxColor(70, 80, 100));     // rubber
-  winPrevSqX = winSqX;
+  // move the squeegee by touching only the exposed/entered edges -> no flicker
+  int nx = (int)(winSqX + 0.5f);
+  int ox = (int)winPrevSqX;
+  if (ox < -100) {                        // first frame: draw the whole bar
+    winDrawBar(nx, nx + WSQW);
+    winPrevSqX = nx;
+  } else if (nx != ox) {
+    int dx = nx - ox;
+    if (dx >= WSQW || dx <= -WSQW) {       // jumped clear: no overlap
+      winRepaint(ox, ox + WSQW);
+      winDrawBar(nx, nx + WSQW);
+    } else if (dx > 0) {                   // moved right
+      winRepaint(ox, nx);                  // expose trailing edge
+      winDrawBar(ox + WSQW, nx + WSQW);    // fill leading edge
+    } else {                              // moved left
+      winRepaint(nx + WSQW, ox + WSQW);
+      winDrawBar(nx, ox);
+    }
+    winPrevSqX = nx;
+  }
 
   // progress
   float sum = 0;
