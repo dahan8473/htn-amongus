@@ -84,6 +84,12 @@ bool taskTryStart(const char *uid) {
   return true;
 }
 
+void taskStartIndex(int t) {
+  if (t < 0 || t >= NUM_TASKS) return;
+  doneTask[t] = false;
+  enterTask(t);
+}
+
 bool taskActive() { return curTask >= 0; }
 
 void taskCancel() { curTask = -1; }

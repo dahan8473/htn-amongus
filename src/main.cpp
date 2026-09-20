@@ -11,24 +11,35 @@
 #include "game.h"
 #include "espnow_prox.h"
 #include "tasks.h"
+#include "tasktest.h"
 
 unsigned long lastPresence = 0;
 unsigned long lastProxDebug = 0;
 bool nfcEnabled = false;
+bool testMode = false;   // solo task-test harness (hold START at boot)
 
 void setup() {
   Serial.begin(115200);
 
   setupLEDs();
   setupDisplay();
-  setupWiFi();
-  setupBroadcast();
   setupButtons();
-  setupPlayers();
-  setupGame();
-  setupTasks();
-  setupProximity(myId());  // ESP-NOW ranging for kills / body reports
 
+  // Hold START while booting -> solo task test mode; skip all networking.
+  for (int i = 0; i < 6; i++) { updateButtons(); delay(12); }
+  testMode = isButtonHeld(BTN_START);
+
+  if (!testMode) {
+    setupWiFi();
+    setupBroadcast();
+    setupPlayers();
+    setupGame();
+    setupProximity(myId());  // ESP-NOW ranging for kills / body reports
+  } else {
+    Serial.println("== TASK TEST MODE (hold START at boot to enter) ==");
+  }
+
+  setupTasks();
   powerDownNFC();  // NFC starts off to save power
 
   if (!setupIMU()) {
@@ -39,6 +50,9 @@ void setup() {
 void loop() {
   updateLEDs();
   updateButtons();
+
+  // solo test harness owns everything when active
+  if (testMode) { taskTestLoop(); return; }
 
   // announce ourselves ~1/sec so every badge builds the same roster
   if (millis() - lastPresence > 1000) {

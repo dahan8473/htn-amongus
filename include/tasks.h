@@ -17,3 +17,7 @@ void taskUpdate();                    // run + render the current minigame
 void taskCancel();                    // abort (meeting called, B pressed, etc.)
 
 int taskJustCompleted();              // task index finished this frame, else -1
+
+// Test harness only: force-launch minigame `t` (0..NUM_TASKS-1), ignoring the
+// NFC mapping and the done flag so it can be replayed.
+void taskStartIndex(int t);
