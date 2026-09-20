@@ -3,7 +3,7 @@
 #include "leds.h"
 #include "display.h"
 #include "imu.h"
-#include "wifi_sta.h"
+#include "espnow_radio.h"
 #include "broadcast.h"
 #include "buttons.h"
 #include "nfc.h"
@@ -20,7 +20,7 @@ void setup() {
 
   setupLEDs();
   setupDisplay();
-  setupWiFi();
+  setupEspNowRadio();
   setupBroadcast();
   setupButtons();
   setupPlayers();
@@ -37,6 +37,7 @@ void setup() {
 void loop() {
   updateLEDs();
   updateButtons();
+  updateBroadcast();  // fires any due mesh relays
 
   // announce ourselves ~1/sec so every badge builds the same roster
   if (millis() - lastPresence > 1000) {

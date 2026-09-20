@@ -1,8 +1,9 @@
 #pragma once
 
 // ESP-NOW proximity ranging. Each badge broadcasts its short player ID and
-// records the RSSI of beacons received from other badges. ESP-NOW uses the
-// current Wi-Fi channel, so it can run beside the router-backed UDP game bus.
+// records the RSSI of beacons received from other badges. Shares the radio
+// brought up by espnow_radio.h on its fixed channel -- no WiFi AP connection
+// needed.
 
 void setupProximity(const char *myId);
 void updateProximity();

@@ -1,17 +1,12 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <esp_now.h>
-#include <esp_wifi.h>
 #include <string.h>
 #include "espnow_prox.h"
+#include "espnow_radio.h"
 
 #define PROX_MAX                16
 #define PROX_STALE_MS           3000
 #define PROX_BEACON_INTERVAL_MS 200
-
-struct ProxBeacon {
-  char id[5];
-};
+#define PKT_PROX                0xA1
 
 struct Rec {
   char id[5];
@@ -24,7 +19,6 @@ static Rec recs[PROX_MAX];
 static int nRecs = 0;
 static char ownId[5] = "";
 static unsigned long lastBeaconMs = 0;
-static bool espNowReady = false;
 static portMUX_TYPE recMux = portMUX_INITIALIZER_UNLOCKED;
 
 static void record(const char *id, int rssi) {
@@ -54,61 +48,30 @@ static void record(const char *id, int rssi) {
   portEXIT_CRITICAL(&recMux);
 }
 
-static void onReceive(const esp_now_recv_info_t *info,
-                      const uint8_t *data, int len) {
-  if (!info || !info->rx_ctrl || len != (int)sizeof(ProxBeacon)) return;
-
-  ProxBeacon beacon;
-  memcpy(&beacon, data, sizeof(beacon));
-  beacon.id[sizeof(beacon.id) - 1] = '\0';
-  if (strlen(beacon.id) != 4) return;
-
-  record(beacon.id, info->rx_ctrl->rssi);
+static void onProxRecv(const uint8_t *mac, int rssi, const uint8_t *data, int len) {
+  if (len != 4) return;
+  char id[5];
+  memcpy(id, data, 4);
+  id[4] = '\0';
+  record(id, rssi);
 }
 
 void setupProximity(const char *myId) {
   strncpy(ownId, myId, sizeof(ownId));
   ownId[sizeof(ownId) - 1] = '\0';
 
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("ESP-NOW proximity init failed");
-    return;
-  }
-  if (esp_now_register_recv_cb(onReceive) != ESP_OK) {
-    Serial.println("ESP-NOW receive callback failed");
-    esp_now_deinit();
-    return;
-  }
-
-  esp_now_peer_info_t peer = {};
-  memset(peer.peer_addr, 0xFF, ESP_NOW_ETH_ALEN);
-  peer.channel = 0;  // follow the channel selected by the connected Wi-Fi AP
-  peer.ifidx = WIFI_IF_STA;
-  peer.encrypt = false;
-  esp_err_t addResult = esp_now_add_peer(&peer);
-  if (addResult != ESP_OK && addResult != ESP_ERR_ESPNOW_EXIST) {
-    Serial.printf("ESP-NOW broadcast peer failed: %d\n", addResult);
-    esp_now_deinit();
-    return;
-  }
-
-  espNowReady = true;
-  Serial.println("ESP-NOW proximity ready");
+  espNowOnReceive(PKT_PROX, onProxRecv);
 }
 
 void updateProximity() {
-  if (!espNowReady || WiFi.status() != WL_CONNECTED) return;
   unsigned long now = millis();
   if (now - lastBeaconMs < PROX_BEACON_INTERVAL_MS) return;
   lastBeaconMs = now;
 
-  ProxBeacon beacon = {};
-  strncpy(beacon.id, ownId, sizeof(beacon.id));
-  static const uint8_t broadcastMac[ESP_NOW_ETH_ALEN] = {
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-  };
-  esp_now_send(broadcastMac,
-               reinterpret_cast<const uint8_t *>(&beacon), sizeof(beacon));
+  uint8_t buf[5];
+  buf[0] = PKT_PROX;
+  memcpy(buf + 1, ownId, 4);
+  espNowSend(buf, 5);
 }
 
 int proximityRssi(const char *id) {
