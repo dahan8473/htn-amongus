@@ -14,6 +14,10 @@ static const PlayerColor COLORS[] = {
   { "Cyan",   60,  200, 210 },
   { "Yellow", 235, 220, 40  },
   { "Purple", 130, 60,  200 },
+  { "White",  245, 245, 245 },
+  { "Lime",   130, 230, 60  },
+  { "Brown",  150, 90,  45  },
+  { "Gray",   140, 140, 150 },
 };
 static const int NCOLORS = sizeof(COLORS) / sizeof(COLORS[0]);
 
