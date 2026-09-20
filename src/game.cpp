@@ -9,7 +9,7 @@
 #include "display.h"
 #include "imu.h"
 #include "leds.h"
-#include "ble_prox.h"
+#include "espnow_prox.h"
 
 #define KILL_RSSI    -66    // ~within a couple meters; tune on hardware
 #define REPORT_RSSI  -66

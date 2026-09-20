@@ -9,7 +9,7 @@
 #include "nfc.h"
 #include "players.h"
 #include "game.h"
-#include "ble_prox.h"
+#include "espnow_prox.h"
 
 unsigned long lastPresence = 0;
 bool nfcEnabled = false;
@@ -24,7 +24,7 @@ void setup() {
   setupButtons();
   setupPlayers();
   setupGame();
-  setupProximity(myId());  // BLE ranging for kills / body reports
+  setupProximity(myId());  // ESP-NOW ranging for kills / body reports
 
   powerDownNFC();  // NFC starts off to save power
 
@@ -66,7 +66,7 @@ void loop() {
     if (uid != "") { Serial.print("Task UID: "); Serial.println(uid); }
   }
 
-  updateProximity();  // keep BLE scanning alive
+  updateProximity();  // send the next ESP-NOW proximity beacon when due
 
   // the state machine owns input handling and all rendering
   gameUpdate();
