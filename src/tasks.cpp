@@ -25,7 +25,6 @@ static float winGrime[WIN_NCOLS];   // remaining grime per column (0..WIN_GMAX)
 static int   winShade[WIN_NCOLS];   // last-drawn shade per column
 static float winSqX, winPrevSqX;    // squeegee left edge, px (prev = last drawn)
 static float winCleaned;            // total grime scrubbed off (0 .. NCOLS*GMAX)
-static unsigned long winLastHit;    // debounce timer for shake detection
 static int   winPct;               // last-drawn percent
 static float navX, navY, navVX, navVY, navPX, navPY;   // 2: navigate (tilt-roll)
 static int navTX, navTY, navHits;
@@ -124,7 +123,7 @@ static void enterTask(int t) {
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) {
     for (int i = 0; i < WIN_NCOLS; i++) { winGrime[i] = WIN_GMAX; winShade[i] = -1; }
-    winSqX = 20; winPrevSqX = -1000; winCleaned = 0; winLastHit = 0; winPct = -1;
+    winSqX = 20; winPrevSqX = -1000; winCleaned = 0; winPct = -1;
   }
   else if (t == 2) {
     navX = navPX = 55; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
@@ -221,9 +220,8 @@ static void runWires() {
 #define WH     150
 #define WCOLW  (WW / WIN_NCOLS)   // 20 px
 #define WSQW    28
-#define SHAKE_G  1.55f            // accel magnitude (g) a shake must beat to register
-#define SHAKE_MS 70               // min gap between counted shakes (debounce)
-#define HIT_AMT  1.2f             // grime scrubbed per shake (window total = NCOLS*GMAX)
+#define WIPE_DEAD 0.18f           // ignore gentle handling below this shake force (g)
+#define WIPE_RATE 0.55f           // grime scrubbed per unit of shake force, per frame
 
 static uint16_t grimeColor(int shade) {
   switch (shade) {
@@ -280,23 +278,25 @@ static void runWindow() {
     drewStatic = true;
   }
 
-  // each hard shake scrubs a chunk of grime (spike + debounce, the proven method)
+  // clean in proportion to how HARD you shake (force above a small deadband)
   float mag = getAccelMagnitude();
-  if (mag > SHAKE_G && millis() - winLastHit > SHAKE_MS) {
-    winLastHit = millis();
-    winCleaned += HIT_AMT;
+  float force = mag - 1.0f - WIPE_DEAD;
+  if (force > 0) {
+    winCleaned += force * WIPE_RATE;
     if (winCleaned > WIN_NCOLS * WIN_GMAX) winCleaned = WIN_NCOLS * WIN_GMAX;
-    flashLEDs(0, 120, 210, 60);   // blue blip: proof the shake registered
   }
 
-  // fill the window left -> right from how much you've scrubbed; refresh shades
+  // fill the window left -> right; flash green as each pane comes fully clean
   for (int c = 0; c < WIN_NCOLS; c++) {
     float rem = WIN_GMAX - (winCleaned - c * WIN_GMAX);
     if (rem < 0) rem = 0;
     if (rem > WIN_GMAX) rem = WIN_GMAX;
     winGrime[c] = rem;
     int s = grimeShade(rem);
-    if (s != winShade[c]) winShade[c] = s;
+    if (s != winShade[c]) {
+      if (s == 0 && winShade[c] != 0) flashLEDs(0, 190, 0, 90);
+      winShade[c] = s;
+    }
   }
 
   // squeegee rides the clean edge; low-passed for smooth motion
@@ -420,8 +420,9 @@ static void runGarbage() {
 #define DDR_LANES 4
 #define DDR_HITS  8
 #define DDR_HITY  188
-#define DDR_TOL   26
-#define DDR_SPEED 3.0f
+#define DDR_TOL   30
+#define DDR_SPEED 1.7f
+#define DDR_SPAWN 950   // ms between new arrows
 
 static int ddrLaneX(int l) { return 52 + l * 72; }   // 52, 124, 196, 268
 
@@ -434,7 +435,7 @@ static void runDDR() {
   }
 
   // spawn arrows on a cadence
-  if (millis() - ddrLastSpawn > 640) {
+  if (millis() - ddrLastSpawn > DDR_SPAWN) {
     for (int i = 0; i < DDR_MAX; i++) if (!ddr[i].on) {
       ddr[i].on = true; ddr[i].lane = esp_random() % DDR_LANES;
       ddr[i].y = 22; ddr[i].py = 22;
