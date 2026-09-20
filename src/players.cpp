@@ -26,6 +26,7 @@ struct RosterEntry {
   bool alive;
   int role;
   int meetings;
+  bool immortal;
   unsigned long lastSeen;
 };
 static RosterEntry roster[MAX_PLAYERS];
@@ -67,6 +68,7 @@ void notePresence(const char *id, int colorIdx) {
     roster[nRoster].alive = true;
     roster[nRoster].role = ROLE_NONE;
     roster[nRoster].meetings = 0;
+    roster[nRoster].immortal = false;
     roster[nRoster].lastSeen = millis();
     nRoster++;
   }
@@ -131,4 +133,11 @@ int aliveRoleCount(int role) {
   int n = 0;
   for (int i = 0; i < nRoster; i++) if (roster[i].alive && roster[i].role == role) n++;
   return n;
+}
+
+bool immortalIdx(int i) { return roster[i].immortal; }
+
+void setImmortalId(const char *id, bool immortal) {
+  int i = rosterIndexOfId(id);
+  if (i >= 0) roster[i].immortal = immortal;
 }

@@ -13,7 +13,7 @@
 
 unsigned long lastPresence = 0;
 unsigned long lastProxDebug = 0;
-bool nfcEnabled = false;
+bool immortal = false;
 
 void setup() {
   Serial.begin(115200);
@@ -27,7 +27,7 @@ void setup() {
   setupGame();
   setupProximity(myId());  // ESP-NOW ranging for kills / body reports
 
-  powerDownNFC();  // NFC starts off to save power
+  powerDownNFC();  // NFC reader stays off; AUX1 is repurposed for demo immortality
 
   if (!setupIMU()) {
     Serial.println("SC7A20 IMU not found at 0x19!");
@@ -56,16 +56,16 @@ void loop() {
     }
   }
 
-  // AUX1 maintained switch toggles the NFC reader for task stickers
+  // AUX1 maintained switch: demo-mode immortality toggle. While ON, this
+  // badge can't be killed or even targeted, regardless of proximity to an
+  // impostor -- synced out so the host (which validates every kill) knows.
   bool sw = isButtonHeld(BTN_AUX1);
-  if (sw != nfcEnabled) {
-    nfcEnabled = sw;
-    if (nfcEnabled) { beginNFCScan(); Serial.println("NFC ON"); }
-    else { powerDownNFC(); Serial.println("NFC OFF"); }
-  }
-  if (nfcEnabled) {
-    String uid = scanNFC();
-    if (uid != "") { Serial.print("Task UID: "); Serial.println(uid); }
+  if (sw != immortal) {
+    immortal = sw;
+    setImmortalId(myId(), immortal);
+    char m[16]; snprintf(m, sizeof(m), "IMM:%s:%d", myId(), immortal ? 1 : 0);
+    broadcastMessage(m);
+    Serial.println(immortal ? "IMMORTAL" : "MORTAL");
   }
 
   updateProximity();  // send the next ESP-NOW proximity beacon when due
