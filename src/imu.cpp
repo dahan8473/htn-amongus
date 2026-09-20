@@ -114,3 +114,20 @@ float getAccelMagnitude() {
   }
   return 1.0f;  // fall back to "at rest" on a bad read
 }
+
+void getAccel(float &ax, float &ay, float &az) {
+  for (int i = 0; i < 3; i++) {
+    Wire.beginTransmission(SC7A20_ADDRESS);
+    Wire.write(0x28 | 0x80);
+    if (Wire.endTransmission(false) != 0) continue;
+    if (Wire.requestFrom((uint16_t)SC7A20_ADDRESS, (uint8_t)6) == 6) {
+      int16_t x = (Wire.read() | (Wire.read() << 8)) >> 4;
+      int16_t y = (Wire.read() | (Wire.read() << 8)) >> 4;
+      int16_t z = (Wire.read() | (Wire.read() << 8)) >> 4;
+      ax = x / 1000.0f; ay = y / 1000.0f; az = z / 1000.0f;
+      return;
+    }
+    delay(1);
+  }
+  // on a bad read, leave the caller's previous values untouched
+}
