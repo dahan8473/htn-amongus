@@ -81,6 +81,7 @@ static void parseTally(const char *s) {
 static bool needRedraw = true;
 static int lastCd = -1;
 static int lastLobbyPlayers = -1;
+static bool bodyNearby = false;  // drives the "hold B to report" HUD hint
 
 // ---------- helpers ----------
 static void storeImpTeam(const char *csv) {
@@ -398,6 +399,13 @@ static void playingInput() {
   // B: hold to kill (impostor, nearest crew in range) or report a nearby body.
   int mi = rosterIndexOfId(myId());
   bool alive = (mi < 0) || aliveIdx(mi);
+
+  // surface a "body nearby, hold B" HUD hint as proximity changes, independent
+  // of whether B is actually pressed -- reporting doesn't change who's dead,
+  // it only ever triggers a meeting, so this is purely a UI affordance.
+  bool nowBodyNearby = alive && (nearestBody() != nullptr);
+  if (nowBodyNearby != bodyNearby) { bodyNearby = nowBodyNearby; needRedraw = true; }
+
   bool bheld = isButtonHeld(BTN_B);
   if (isButtonPressed(BTN_B)) { bDownAt = millis(); bActed = false; }
   if (alive && bheld && !bActed && millis() - bDownAt > KILL_HOLD_MS) {
@@ -526,7 +534,7 @@ void gameUpdate() {
         } else {
           int mi = rosterIndexOfId(myId());
           bool alive = (mi < 0) || aliveIdx(mi);
-          showHUD(alive, aliveCount(), c.r, c.g, c.b);      // color only
+          showHUD(alive, aliveCount(), c.r, c.g, c.b, bodyNearby);
         }
       }
       break;

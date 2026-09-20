@@ -192,7 +192,8 @@ void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
   tft.print("START = play");
 }
 
-void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB) {
+void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB,
+             bool bodyNearby) {
   tft.fillScreen(C_NAVY);
   if (!alive) {
     drawCrewmate(80, 120, tft.color565(70, 70, 80));  // grey ghost
@@ -216,6 +217,16 @@ void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB) {
   char b[20]; snprintf(b, sizeof(b), "Alive: %d ", aliveCount);
   tft.setCursor(150, 115);
   tft.print(b);
+
+  if (bodyNearby) {
+    tft.setTextColor(C_RED, C_NAVY);
+    tft.setTextSize(2);
+    tft.setCursor(150, 148);
+    tft.print("BODY NEARBY");
+    tft.setCursor(150, 170);
+    tft.print("HOLD B=report");
+  }
+
   tft.setTextColor(tft.color565(150, 150, 170), C_NAVY);
   tft.setCursor(14, 200);
   tft.print("tap HOME=meeting");

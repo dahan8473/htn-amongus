@@ -24,8 +24,10 @@ void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
                int colorR, int colorG, int colorB);
 
 // In-game status: your crewmate + color, alive count (or GHOST if dead).
-// Role is NOT shown here -- hold START to see it.
-void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB);
+// Role is NOT shown here -- hold START to see it. bodyNearby shows a
+// "hold B to report" hint whenever a dead player is within report range.
+void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB,
+             bool bodyNearby);
 
 // Voting screen: the current pick (a color, or SKIP), countdown, and hints.
 void showVote(const char *name, int colorR, int colorG, int colorB,
