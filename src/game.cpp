@@ -48,6 +48,7 @@ static unsigned long bDownAt = 0;
 static bool bActed = false;
 static unsigned long lastKillMs[MAX_PLAYERS] = { 0 };  // host kill cooldown
 static unsigned long killedFlashUntil = 0;             // red flash when I die
+static unsigned long myKillCooldownUntil = 0;          // this badge's own cooldown, for UI + client-side gating
 
 static int voteSel = 0;
 static bool myVoted = false;
@@ -82,6 +83,7 @@ static bool needRedraw = true;
 static int lastCd = -1;
 static int lastLobbyPlayers = -1;
 static bool bodyNearby = false;  // drives the "hold B to report" HUD hint
+static int lastKillCdShown = -1; // drives the role-card cooldown redraw tick
 
 // ---------- helpers ----------
 static void storeImpTeam(const char *csv) {
@@ -162,6 +164,7 @@ static void hostStartGame() {
     broadcastMessage(m);
     if (strcmp(rosterId(i), myId()) == 0) {
       myRole = role;
+      myKillCooldownUntil = 0;  // fresh cooldown for the new round
       if (role == ROLE_IMP) storeImpTeam(impCsv);
     }
   }
@@ -272,6 +275,7 @@ void gameHandleMessage(const char *msg) {
       setRoleId(id, role);
       if (strcmp(id, myId()) == 0) {
         myRole = role;
+        myKillCooldownUntil = 0;  // fresh cooldown for the new round
         if (role == ROLE_IMP && got == 3) storeImpTeam(csv);
       }
     }
@@ -410,7 +414,14 @@ static void playingInput() {
   if (isButtonPressed(BTN_B)) { bDownAt = millis(); bActed = false; }
   if (alive && bheld && !bActed && millis() - bDownAt > KILL_HOLD_MS) {
     bActed = true;
-    const char *tgt = (myRole == ROLE_IMP) ? nearestKillTarget() : nullptr;
+    bool offCooldown = millis() >= myKillCooldownUntil;
+    const char *tgt = (myRole == ROLE_IMP && offCooldown) ? nearestKillTarget() : nullptr;
+    if (myRole == ROLE_IMP) {
+      // holding B always restarts the cooldown, hit or miss -- an impostor
+      // can't spam it to fish for a target for free.
+      myKillCooldownUntil = millis() + KILL_CD_MS;
+      needRedraw = true;
+    }
     if (tgt) {
       if (isHost) hostKill(myId(), tgt);
       else { char m[24]; snprintf(m, sizeof(m), "KILL:%s:%s", myId(), tgt); req(m); }
@@ -518,8 +529,11 @@ void gameUpdate() {
         showLobby(rosterCount(), cfgImp, cfgDisc, cfgVote, cfgMeet, setSel, c.r, c.g, c.b);
       }
       break;
-    case G_PLAYING:
-      if (needRedraw) {
+    case G_PLAYING: {
+      long killRemainMs = (long)myKillCooldownUntil - (long)millis();
+      int killCdSecs = killRemainMs > 0 ? (int)((killRemainMs + 999) / 1000) : 0;
+      bool killCdTick = revealActive && (killCdSecs != lastKillCdShown);
+      if (needRedraw || killCdTick) {
         const PlayerColor &c = colorByIndex(myColorIndex());
         if (revealActive) {
           uint8_t tr[MAX_PLAYERS], tg[MAX_PLAYERS], tb[MAX_PLAYERS];
@@ -530,14 +544,16 @@ void gameUpdate() {
               if (ri >= 0) { const PlayerColor &tc = colorByIndex(rosterColorIndex(ri)); tr[nt] = tc.r; tg[nt] = tc.g; tb[nt] = tc.b; nt++; }
             }
           }
-          showRoleCard(c.r, c.g, c.b, myRole == ROLE_IMP, nt, tr, tg, tb);  // held START
+          showRoleCard(c.r, c.g, c.b, myRole == ROLE_IMP, nt, tr, tg, tb, killCdSecs);  // held START
         } else {
           int mi = rosterIndexOfId(myId());
           bool alive = (mi < 0) || aliveIdx(mi);
           showHUD(alive, aliveCount(), c.r, c.g, c.b, bodyNearby);
         }
       }
+      lastKillCdShown = killCdSecs;
       break;
+    }
     case G_GATHER:
       if (needRedraw) { showMeetingScreen(); showMeetingWaiting(); }
       break;

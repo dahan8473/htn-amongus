@@ -127,7 +127,7 @@ static void drawMiniMate(int cx, int cy, uint16_t body) {
 
 void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
                   int nTeam, const uint8_t *teamR, const uint8_t *teamG,
-                  const uint8_t *teamB) {
+                  const uint8_t *teamB, int killCooldownSecs) {
   uint16_t bg = isImpostor ? tft.color565(40, 0, 0) : tft.color565(0, 10, 30);
   uint16_t banner = isImpostor ? C_RED : tft.color565(40, 90, 220);
   tft.fillScreen(bg);
@@ -145,6 +145,11 @@ void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
   tft.setCursor(140, 100);
   tft.print(isImpostor ? "Sabotage & kill" : "Do your tasks");
 
+  // how to use the B button, since it does double duty (kill vs. report)
+  tft.setTextColor(tft.color565(200, 200, 210), bg);
+  tft.setCursor(140, 120);
+  tft.print(isImpostor ? "Hold B = kill" : "Hold B = report");
+
   // fellow impostors, if any
   if (isImpostor && nTeam > 0) {
     tft.setTextColor(tft.color565(255, 170, 170), bg);
@@ -153,6 +158,20 @@ void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
     tft.print("Team:");
     for (int i = 0; i < nTeam && i < 6; i++) {
       drawMiniMate(230 + i * 26, 150, tft.color565(teamR[i], teamG[i], teamB[i]));
+    }
+  }
+
+  // kill cooldown, so the impostor knows when they can attack again
+  if (isImpostor) {
+    tft.setTextSize(2);
+    tft.setCursor(140, 185);
+    if (killCooldownSecs > 0) {
+      tft.setTextColor(tft.color565(255, 140, 60), bg);
+      char buf[20]; snprintf(buf, sizeof(buf), "Cooldown: %ds ", killCooldownSecs);
+      tft.print(buf);
+    } else {
+      tft.setTextColor(tft.color565(120, 230, 140), bg);
+      tft.print("Ready to kill ");
     }
   }
 }

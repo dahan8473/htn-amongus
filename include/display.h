@@ -13,10 +13,12 @@ void clearScreen();
 
 // Role reveal card: a crewmate in the player's color, CREWMATE (blue) or
 // IMPOSTOR (red) banner. If impostor, small crewmate icons for each teammate
-// color are drawn on the left so you know your fellow impostors.
+// color are drawn on the left so you know your fellow impostors, plus a kill
+// cooldown readout (killCooldownSecs seconds remaining, or "Ready to kill"
+// at 0). killCooldownSecs is ignored when not an impostor.
 void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
                   int nTeam, const uint8_t *teamR, const uint8_t *teamG,
-                  const uint8_t *teamB);
+                  const uint8_t *teamB, int killCooldownSecs);
 
 // Lobby: AMONG US logo, crewmate in your color, player count, and the
 // host-adjustable settings list with a cursor on row `sel`.
