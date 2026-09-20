@@ -44,13 +44,27 @@ void resetTasks() {
   curTask = -1;
 }
 
-// -1 = normal (map each tag by hash). 0-3 = TEST: every tag launches this game.
-// 0 Wires, 1 Window wipe, 2 Garbage, 3 Calibrate.
-#define FORCE_TASK 1
+// -1 = normal (map each tag via TAG_MAP below). 0-3 = TEST: every tag launches
+// this one game. 0 Wires, 1 Window wipe, 2 Garbage, 3 Calibrate.
+#define FORCE_TASK -1
+
+// Which physical tag opens which game. Paste each tag's UID (uppercase hex, no
+// spaces) from the serial line "Scanned tag UID: XXXX". Empty slots are ignored
+// and any unlisted tag falls back to a stable hash so it still opens some game.
+struct TagMap { const char *uid; int task; };
+static const TagMap TAG_MAP[] = {
+  { "", 0 },  // -> Wires
+  { "", 1 },  // -> Window Wipe
+  { "", 2 },  // -> Garbage
+  { "", 3 },  // -> Calibrate
+};
 
 static int uidToTask(const char *uid) {
   if (FORCE_TASK >= 0) return FORCE_TASK;
-  uint32_t h = 0;
+  for (unsigned i = 0; i < sizeof(TAG_MAP) / sizeof(TAG_MAP[0]); i++) {
+    if (TAG_MAP[i].uid[0] && strcmp(TAG_MAP[i].uid, uid) == 0) return TAG_MAP[i].task;
+  }
+  uint32_t h = 0;                       // unknown tag: still open *a* game
   for (const char *p = uid; *p; p++) h = h * 131u + (uint8_t)*p;
   return h % NUM_TASKS;
 }
