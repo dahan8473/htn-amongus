@@ -59,12 +59,11 @@ void updateDisplay(float x, float y, bool nfcEnabled) {
 #define C_RED    tft.color565(197, 27, 27)
 #define C_REDDK  tft.color565(120, 12, 12)
 #define C_VISOR  tft.color565(150, 210, 236)
-#define C_SHADOW tft.color565(90, 12, 12)
 
 // A classic Among Us crewmate: body, backpack, legs, visor. (cx,cy) = body center.
 static void drawCrewmate(int cx, int cy, uint16_t body) {
-  // backpack (behind the body)
-  tft.fillRoundRect(cx + 18, cy - 16, 16, 36, 7, C_SHADOW);
+  // backpack (behind the body, same color as the crewmate)
+  tft.fillRoundRect(cx + 18, cy - 16, 16, 36, 7, body);
   // body (tall rounded capsule)
   tft.fillRoundRect(cx - 26, cy - 38, 50, 76, 22, body);
   // leg gap carved out of the bottom
