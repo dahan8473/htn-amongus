@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <esp_random.h>
 #include <string.h>
-#include <Preferences.h>
 #include "tasks.h"
 #include "buttons.h"
 #include "imu.h"
@@ -18,6 +17,7 @@ static int justCompleted = -1;
 
 // per-minigame state
 static int seq[6], seqPos, wireRound;      // 0: wires (multiple sequences)
+static int wireShownPos = -1;              // last seqPos actually drawn
 // 1: window cleaning -- wipe the badge like a sponge; harder wipe = faster squeegee + faster clean
 #define WIN_NCOLS 14
 #define WIN_GMAX  3.0f
@@ -27,7 +27,7 @@ static float winSqX, winPrevSqX;    // squeegee left edge, px (prev = last drawn
 static float winCleaned;            // total grime scrubbed off (0 .. NCOLS*GMAX)
 static int   winPct;               // last-drawn percent
 static float navX, navY, navVX, navVY, navPX, navPY;   // 2: navigate (tilt-roll)
-static int navTX, navTY, navHits;
+static int navTX, navTY, navHits, navHitsShown;
 // 3: rhythm (DDR) -- arrows fall in 4 lanes, hit the matching d-pad at the line
 #define DDR_MAX 8
 struct Arrow { bool on; int lane; float y, py; };
@@ -37,79 +37,16 @@ static unsigned long ddrLastSpawn;
 
 static uint16_t NAVY, WHITE, GREEN, RED, YELLOW, DIM;
 
-static void loadTagMap();
-
 void setupTasks() {
   NAVY = gfxColor(10, 12, 34); WHITE = gfxColor(255, 255, 255);
   GREEN = gfxColor(70, 210, 90); RED = gfxColor(220, 60, 60);
   YELLOW = gfxColor(240, 220, 60); DIM = gfxColor(150, 150, 170);
-  loadTagMap();
   resetTasks();
 }
 
 void resetTasks() {
   for (int i = 0; i < NUM_TASKS; i++) doneTask[i] = false;
   curTask = -1;
-}
-
-// -1 = normal (map each tag via TAG_MAP below). 0-3 = TEST: every tag launches
-// this one game. 0 Wires, 1 Window wipe, 2 Garbage, 3 Rhythm.
-#define FORCE_TASK -1
-
-// Which physical tag opens which game. Paste each tag's UID (uppercase hex, no
-// spaces) from the serial line "Scanned tag UID: XXXX". Empty slots are ignored
-// and any unlisted tag falls back to a stable hash so it still opens some game.
-struct TagMap { const char *uid; int task; };
-static const TagMap TAG_MAP[] = {
-  { "", 0 },  // -> Wires
-  { "", 1 },  // -> Window Wipe
-  { "", 2 },  // -> Garbage
-  { "", 3 },  // -> Rhythm
-};
-
-// Runtime pairings set on-device via the test-harness ASSIGN screen and saved to
-// flash (NVS), so they survive reboots and reflashes.
-static char tagUid[NUM_TASKS][22];
-static Preferences tagPrefs;
-
-static void loadTagMap() {
-  tagPrefs.begin("tags", true);
-  for (int i = 0; i < NUM_TASKS; i++) {
-    char key[4]; snprintf(key, sizeof(key), "g%d", i);
-    String v = tagPrefs.getString(key, "");
-    strncpy(tagUid[i], v.c_str(), sizeof(tagUid[i]) - 1);
-    tagUid[i][sizeof(tagUid[i]) - 1] = 0;
-  }
-  tagPrefs.end();
-}
-
-void assignTag(int game, const char *uid) {
-  if (game < 0 || game >= NUM_TASKS) return;
-  for (int i = 0; i < NUM_TASKS; i++)                     // a tag maps to one game
-    if (i != game && strcmp(tagUid[i], uid) == 0) tagUid[i][0] = 0;
-  strncpy(tagUid[game], uid, sizeof(tagUid[game]) - 1);
-  tagUid[game][sizeof(tagUid[game]) - 1] = 0;
-  tagPrefs.begin("tags", false);
-  for (int i = 0; i < NUM_TASKS; i++) {
-    char key[4]; snprintf(key, sizeof(key), "g%d", i);
-    tagPrefs.putString(key, tagUid[i]);
-  }
-  tagPrefs.end();
-}
-
-const char *tagForGame(int game) {
-  return (game >= 0 && game < NUM_TASKS) ? tagUid[game] : "";
-}
-
-static int uidToTask(const char *uid) {
-  if (FORCE_TASK >= 0) return FORCE_TASK;
-  for (int i = 0; i < NUM_TASKS; i++)                     // saved pairings win
-    if (tagUid[i][0] && strcmp(tagUid[i], uid) == 0) return i;
-  for (unsigned i = 0; i < sizeof(TAG_MAP) / sizeof(TAG_MAP[0]); i++)
-    if (TAG_MAP[i].uid[0] && strcmp(TAG_MAP[i].uid, uid) == 0) return TAG_MAP[i].task;
-  uint32_t h = 0;                                         // unknown: still open *a* game
-  for (const char *p = uid; *p; p++) h = h * 131u + (uint8_t)*p;
-  return h % NUM_TASKS;
 }
 
 static void newChute();  // defined with the garbage minigame below
@@ -122,23 +59,26 @@ static void enterTask(int t) {
   justCompleted = -1;
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) {
-    for (int i = 0; i < WIN_NCOLS; i++) { winGrime[i] = WIN_GMAX; winShade[i] = -1; }
-    winSqX = 20; winPrevSqX = -1000; winCleaned = 0; winPct = -1;
-  }
-  else if (t == 2) {
-    navX = navPX = 55; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
+    navX = navPX = 55; navY = navPY = 185; navVX = navVY = 0; navHits = 0; navHitsShown = -1;
     genWalls();
     newChute();
+  }
+  else if (t == 2) {
+    for (int i = 0; i < WIN_NCOLS; i++) { winGrime[i] = WIN_GMAX; winShade[i] = -1; }
+    winSqX = 20; winPrevSqX = -1000; winCleaned = 0; winPct = -1;
   }
   else if (t == 3) { for (int i = 0; i < DDR_MAX; i++) ddr[i].on = false; ddrHits = 0; ddrShown = -1; ddrLastSpawn = 0; }
 }
 
-bool taskTryStart(const char *uid) {
+// Which specific tag was scanned no longer matters -- any tag just opens the
+// next uncompleted task, in fixed order. Simpler than mapping tag identity to
+// a task, and doesn't depend on reliably reading a tag's UID.
+bool taskTryStart(const char * /*uid*/) {
   if (curTask >= 0) return false;
-  int t = uidToTask(uid);
-  if (doneTask[t]) return false;
-  enterTask(t);
-  return true;
+  for (int t = 0; t < NUM_TASKS; t++) {
+    if (!doneTask[t]) { enterTask(t); return true; }
+  }
+  return false;  // every task already completed
 }
 
 void taskStartIndex(int t) {
@@ -184,6 +124,7 @@ static void runWires() {
     char r[16]; snprintf(r, sizeof(r), "Round %d/%d", wireRound + 1, WIRE_ROUNDS);
     gfxText(105, 190, 2, DIM, r);
     drewStatic = true;
+    wireShownPos = -1;  // force the glyph row to redraw after the clear
   }
   int d = -1;
   if (isButtonPressed(BTN_UP)) d = 0;
@@ -201,11 +142,14 @@ static void runWires() {
     drewStatic = false;   // redraw title + new round number
     return;
   }
-  // arrow/button row (redraw on change)
-  gfxFillRect(10, 95, 300, 60, NAVY);
-  for (int i = 0; i < WIRE_LEN; i++) {
-    uint16_t c = (i < seqPos) ? GREEN : (i == seqPos ? YELLOW : DIM);
-    drawGlyph(35 + i * 58, 125, seq[i], c);
+  // arrow/button row -- only touch the display when the position actually moved
+  if (seqPos != wireShownPos) {
+    wireShownPos = seqPos;
+    gfxFillRect(10, 95, 300, 60, NAVY);
+    for (int i = 0; i < WIRE_LEN; i++) {
+      uint16_t c = (i < seqPos) ? GREEN : (i == seqPos ? YELLOW : DIM);
+      drawGlyph(35 + i * 58, 125, seq[i], c);
+    }
   }
 }
 
@@ -380,6 +324,14 @@ static void runGarbage() {
     gfxClear(NAVY);
     gfxText(30, 8, 3, WHITE, "GARBAGE");
     gfxText(10, 222, 2, DIM, "tilt trash to the chute");
+    // walls and the chute target are fixed for the whole chute -- draw them
+    // once here instead of every frame; the ball's physics (hitsWall) always
+    // keeps clearance from walls, and completion triggers before the ball is
+    // ever drawn overlapping the chute, so neither gets scuffed by the ball's
+    // per-frame erase.
+    for (int i = 0; i < NWALLS; i++) gfxFillRect(walls[i].x, walls[i].y, walls[i].w, walls[i].h, gfxColor(110, 110, 125));
+    gfxFillRect(navTX - 14, navTY - 14, 28, 28, gfxColor(30, 120, 40));  // chute
+    gfxRectOutline(navTX - 14, navTY - 14, 28, 28, GREEN);
     drewStatic = true;
   }
   float r, p; getRollPitch(r, p);
@@ -407,14 +359,14 @@ static void runGarbage() {
   }
 
   gfxFillCircle((int)navPX, (int)navPY, 9, NAVY);          // erase old trash
-  for (int i = 0; i < NWALLS; i++) gfxFillRect(walls[i].x, walls[i].y, walls[i].w, walls[i].h, gfxColor(110, 110, 125));
-  gfxFillRect(navTX - 14, navTY - 14, 28, 28, gfxColor(30, 120, 40));  // chute
-  gfxRectOutline(navTX - 14, navTY - 14, 28, 28, GREEN);
   gfxFillCircle((int)navX, (int)navY, BALL_R, gfxColor(150, 120, 80));  // trash
   navPX = navX; navPY = navY;
-  char h[12]; snprintf(h, sizeof(h), "%d/3", navHits);
-  gfxFillRect(282, 34, 36, 20, NAVY);
-  gfxText(284, 36, 2, GREEN, h);
+  if (navHits != navHitsShown) {
+    navHitsShown = navHits;
+    char h[12]; snprintf(h, sizeof(h), "%d/3", navHits);
+    gfxFillRect(282, 34, 36, 20, NAVY);
+    gfxText(284, 36, 2, GREEN, h);
+  }
 }
 
 #define DDR_LANES 4
@@ -495,8 +447,8 @@ void taskUpdate() {
   if (millis() - taskStart > TASK_TIMEOUT_MS) { taskCancel(); return; }
   switch (curTask) {
     case 0: runWires(); break;
-    case 1: runWindow(); break;
-    case 2: runGarbage(); break;
+    case 1: runGarbage(); break;
+    case 2: runWindow(); break;
     case 3: runDDR(); break;
   }
 }

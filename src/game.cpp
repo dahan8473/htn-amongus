@@ -17,6 +17,13 @@
 #define KILL_HOLD_MS 700
 #define KILL_CD_MS   20000
 
+// How many of the NUM_TASKS minigames each crewmate must finish for their
+// share of the win bar to count -- deliberately <= NUM_TASKS so the crew win
+// condition is reachable even when not every one of the NUM_TASKS tags is
+// actually in play (extra minigames are still playable, just don't keep
+// crediting progress past this per-player cap).
+#define TASKS_TO_WIN 2
+
 #define REVEAL_MS 5000
 #define RESULT_MS 4000
 
@@ -88,6 +95,7 @@ static int lastKillCdShown = -1; // drives the role-card cooldown redraw tick
 
 // crew task progress (host authoritative, broadcast via PROG)
 static int taskDone = 0, taskTotal = 0;
+static int taskCredit[MAX_PLAYERS];  // host-only: completions credited per roster slot, capped at TASKS_TO_WIN
 
 // ---------- helpers ----------
 static void storeImpTeam(const char *csv) {
@@ -183,10 +191,11 @@ static void hostStartGame() {
   }
   broadcastCfg();
   broadcastAlive();
-  // crew task pool: each crewmate must finish all NUM_TASKS
+  // crew task pool: each crewmate must finish TASKS_TO_WIN of the NUM_TASKS minigames
   resetTasks();
   taskDone = 0;
-  taskTotal = aliveRoleCount(ROLE_CREW) * NUM_TASKS;
+  memset(taskCredit, 0, sizeof(taskCredit));
+  taskTotal = aliveRoleCount(ROLE_CREW) * TASKS_TO_WIN;
   char pm[24]; snprintf(pm, sizeof(pm), "PROG:%d:%d", taskDone, taskTotal);
   broadcastMessage(pm);
   setPhaseHost(G_PLAYING, 0);
@@ -285,10 +294,17 @@ static void hostReport(const char *reporter) {
   setPhaseHost(G_GATHER, 0);
 }
 
-// a crewmate finished a task (deduped on the sender). Advance the bar; a full
-// bar wins it for the crew.
-static void hostTaskDone() {
+// a crewmate finished a task. Only living crew get credit, and only up to
+// TASKS_TO_WIN each -- capped per player so one badge replaying extra
+// minigames (or a stray duplicate message) can't inflate the shared bar
+// beyond what every crewmate is actually required to do. Advance the bar; a
+// full bar wins it for the crew.
+static void hostTaskDone(const char *id) {
   if (phase != G_PLAYING) return;
+  int i = rosterIndexOfId(id);
+  if (i < 0 || !aliveIdx(i) || roleIdx(i) != ROLE_CREW) return;
+  if (taskCredit[i] >= TASKS_TO_WIN) return;  // already credited their share
+  taskCredit[i]++;
   taskDone++;
   char pm[24]; snprintf(pm, sizeof(pm), "PROG:%d:%d", taskDone, taskTotal);
   broadcastMessage(pm);
@@ -352,7 +368,7 @@ void gameHandleMessage(const char *msg) {
   } else if (isHost && strncmp(msg, "RPT:", 4) == 0) {
     hostReport(msg + 4);
   } else if (isHost && strncmp(msg, "TDONE:", 6) == 0) {
-    hostTaskDone();
+    hostTaskDone(msg + 6);
   } else if (isHost && strncmp(msg, "RM:", 3) == 0) {
     if (phase == G_PLAYING) {
       const char *id = msg + 3;
@@ -518,6 +534,7 @@ void setupGame() {
 // called by main when an NFC tag is scanned: start that tag's task minigame.
 // Allowed in LOBBY too so a single badge can test tasks without a full game.
 void gameOnNfc(const char *uid) {
+  if (myRole == ROLE_IMP) return;  // impostors can't do tasks at all, not even for cover
   int mi = rosterIndexOfId(myId());
   bool alive = (mi < 0) || aliveIdx(mi);
   if ((phase == G_PLAYING || phase == G_LOBBY) && alive && !taskActive()) taskTryStart(uid);
@@ -547,7 +564,7 @@ void gameUpdate() {
       taskUpdate();
       int jc = taskJustCompleted();
       if (jc >= 0 && myRole == ROLE_CREW) {   // only crew tasks count
-        if (isHost) hostTaskDone();
+        if (isHost) hostTaskDone(myId());
         else { char m[16]; snprintf(m, sizeof(m), "TDONE:%s", myId()); req(m); }
       }
       if (taskActive()) return;   // minigame owns the screen

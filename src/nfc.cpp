@@ -12,12 +12,19 @@ MFRC522 mfrc522(NFC_ADDRESS, RST_PIN);
 void beginNFCScan() {
   // Manual Soft Power Up: Clear the PowerDown bit (bit 4) in CommandReg (0x01)
   mfrc522.PCD_ClearRegisterBitMask(mfrc522.CommandReg, (1<<4));
-  
+
   // The oscillator needs a moment to stabilize after waking up
-  delay(50); 
-  
+  delay(50);
+
   // Re-initialize registers after waking up
   mfrc522.PCD_Init();
+
+  // Diagnostic: confirm the reader chip itself is actually responding on I2C.
+  // A real MFRC522 reports 0x91 or 0x92 here; 0x00 or 0xFF means the chip
+  // isn't answering (wiring/power/address problem), regardless of any tag.
+  byte version = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
+  Serial.print("NFC reader VersionReg=0x");
+  Serial.println(version, HEX);
 }
 
 void powerDownNFC() {
