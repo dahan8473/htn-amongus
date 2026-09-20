@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <math.h>
 #include <string.h>
 #include "espnow_prox.h"
 
@@ -97,7 +98,9 @@ void setupProximity(const char *myId) {
 }
 
 void updateProximity() {
-  if (!espNowReady || WiFi.status() != WL_CONNECTED) return;
+  // ESP-NOW is direct radio traffic; it can keep working while the badge is
+  // still trying to join the router used by the UDP game bus.
+  if (!espNowReady) return;
   unsigned long now = millis();
   if (now - lastBeaconMs < PROX_BEACON_INTERVAL_MS) return;
   lastBeaconMs = now;
@@ -134,14 +137,28 @@ void debugProximity() {
   portEXIT_CRITICAL(&recMux);
 
   Serial.print("PROX");
+  if (count == 0) {
+    Serial.println(" none");
+    return;
+  }
   unsigned long now = millis();
   for (int i = 0; i < count; i++) {
     if (!snapshot[i].initialized) continue;
     Serial.print(" ");
     Serial.print(snapshot[i].id);
     Serial.print("=");
-    if (now - snapshot[i].ms < PROX_STALE_MS) Serial.print(snapshot[i].rssi);
-    else Serial.print("stale");
+    if (now - snapshot[i].ms < PROX_STALE_MS) {
+      Serial.print(snapshot[i].rssi);
+      // Very rough free-space/path-loss estimate. RSSI is not a tape measure;
+      // these constants are only useful as a starting point for calibration.
+      const float rssiAtOneMeter = -55.0f;
+      const float pathLossExponent = 2.5f;
+      float metres = powf(10.0f,
+        (rssiAtOneMeter - snapshot[i].rssi) / (10.0f * pathLossExponent));
+      Serial.print("dBm(~");
+      Serial.print(metres, 1);
+      Serial.print("m)");
+    } else Serial.print("stale");
   }
   Serial.println();
 }
