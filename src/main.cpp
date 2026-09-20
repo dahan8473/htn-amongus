@@ -57,15 +57,18 @@ void loop() {
     }
   }
 
-  // NFC on only while playing, so crew can scan task tags (off elsewhere saves power)
-  bool wantNfc = (gamePhase() == G_PLAYING);
+  // NFC on during play AND lobby (lobby lets a single badge test tasks)
+  bool wantNfc = (gamePhase() == G_PLAYING || gamePhase() == G_LOBBY);
   if (wantNfc != nfcEnabled) {
     nfcEnabled = wantNfc;
     if (nfcEnabled) beginNFCScan(); else powerDownNFC();
   }
   if (nfcEnabled) {
     String uid = scanNFC();
-    if (uid != "") gameOnNfc(uid.c_str());  // start the tag's task minigame
+    if (uid != "") {
+      Serial.print("Scanned tag UID: "); Serial.println(uid);  // for hard-mapping later
+      gameOnNfc(uid.c_str());
+    }
   }
 
   updateProximity();  // send the next ESP-NOW proximity beacon when due

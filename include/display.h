@@ -48,6 +48,7 @@ void gfxText(int x, int y, int size, uint16_t color, const char *s);
 void gfxRectOutline(int x, int y, int w, int h, uint16_t color);
 void gfxFillRect(int x, int y, int w, int h, uint16_t color);
 void gfxFillCircle(int x, int y, int r, uint16_t color);
+void gfxFillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t color);
 
 // Thin crew task-progress bar across the top (pct 0-100).
 void drawTaskBar(int pct);

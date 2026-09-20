@@ -6,7 +6,7 @@
 #include "imu.h"
 #include "display.h"
 
-#define TASK_TIMEOUT_MS 30000
+#define TASK_TIMEOUT_MS 20000
 
 static bool doneTask[NUM_TASKS];
 static int curTask = -1;          // which minigame is running (-1 = none)
@@ -34,7 +34,12 @@ void resetTasks() {
   curTask = -1;
 }
 
+// -1 = normal (map each tag by hash). 0-3 = TEST: every tag launches this game.
+// Set to 0 to make any tag open Wires for single-tag testing.
+#define FORCE_TASK 0
+
 static int uidToTask(const char *uid) {
+  if (FORCE_TASK >= 0) return FORCE_TASK;
   uint32_t h = 0;
   for (const char *p = uid; *p; p++) h = h * 131u + (uint8_t)*p;
   return h % NUM_TASKS;
@@ -45,7 +50,7 @@ static void enterTask(int t) {
   drewStatic = false;
   taskStart = millis();
   justCompleted = -1;
-  if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 4; seqPos = 0; }
+  if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; }
   else if (t == 1) { shakeFill = 0; lastShake = 0; }
   else if (t == 2) { levelSince = 0; }
   else if (t == 3) { calRound = 0; calPos = 0; calDir = 2.2f; calZoneL = 62; calZoneW = 26; }
@@ -72,13 +77,27 @@ static void finish() {
 }
 
 // ---- minigame renderers/updaters ----
-static const char *ARROWS[4] = { "UP", "DN", "LF", "RT" };
+// input types: 0 UP, 1 DOWN, 2 LEFT, 3 RIGHT, 4 A, 5 B
+#define WIRE_LEN 5
+
+// draw one sequence glyph centered at (cx,cy): arrows for 0-3, letters for A/B
+static void drawGlyph(int cx, int cy, int type, uint16_t c) {
+  int s = 12;
+  switch (type) {
+    case 0: gfxFillTriangle(cx, cy - s, cx - s, cy + s, cx + s, cy + s, c); break;  // up
+    case 1: gfxFillTriangle(cx, cy + s, cx - s, cy - s, cx + s, cy - s, c); break;  // down
+    case 2: gfxFillTriangle(cx - s, cy, cx + s, cy - s, cx + s, cy + s, c); break;  // left
+    case 3: gfxFillTriangle(cx + s, cy, cx - s, cy - s, cx - s, cy + s, c); break;  // right
+    case 4: gfxText(cx - 8, cy - 10, 3, c, "A"); break;
+    case 5: gfxText(cx - 8, cy - 10, 3, c, "B"); break;
+  }
+}
 
 static void runWires() {
   if (!drewStatic) {
     gfxClear(NAVY);
-    gfxText(90, 20, 3, WHITE, "WIRES");
-    gfxText(40, 210, 2, DIM, "match the arrows");
+    gfxText(90, 18, 3, WHITE, "WIRES");
+    gfxText(30, 205, 2, DIM, "match the sequence");
     drewStatic = true;
   }
   int d = -1;
@@ -86,14 +105,15 @@ static void runWires() {
   else if (isButtonPressed(BTN_DOWN)) d = 1;
   else if (isButtonPressed(BTN_LEFT)) d = 2;
   else if (isButtonPressed(BTN_RIGHT)) d = 3;
+  else if (isButtonPressed(BTN_A)) d = 4;
+  else if (isButtonPressed(BTN_B)) d = 5;
   if (d >= 0 && d == seq[seqPos]) seqPos++;
-  else if (d >= 0) { /* wrong: flash the row red briefly */ gfxFillRect(20, 90, 280, 50, RED); }
-  if (seqPos >= 5) { finish(); return; }
-  // draw the arrow row (redraw each change)
-  gfxFillRect(20, 90, 280, 50, NAVY);
-  for (int i = 0; i < 5; i++) {
+  if (seqPos >= WIRE_LEN) { finish(); return; }
+  // arrow/button row (redraw on change)
+  gfxFillRect(10, 90, 300, 60, NAVY);
+  for (int i = 0; i < WIRE_LEN; i++) {
     uint16_t c = (i < seqPos) ? GREEN : (i == seqPos ? YELLOW : DIM);
-    gfxText(30 + i * 56, 100, 3, c, ARROWS[seq[i]]);
+    drawGlyph(35 + i * 58, 120, seq[i], c);
   }
 }
 
@@ -148,7 +168,9 @@ static void runCalibrate() {
 
 void taskUpdate() {
   if (curTask < 0) return;
-  if (isButtonPressed(BTN_B) || millis() - taskStart > TASK_TIMEOUT_MS) { taskCancel(); return; }
+  // no button cancel: A/B/d-pad are all game inputs. Ends on completion,
+  // a 20s timeout, or a meeting (game.cpp cancels on phase change).
+  if (millis() - taskStart > TASK_TIMEOUT_MS) { taskCancel(); return; }
   switch (curTask) {
     case 0: runWires(); break;
     case 1: runShake(); break;

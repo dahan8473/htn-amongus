@@ -486,11 +486,12 @@ void setupGame() {
   myRole = ROLE_NONE;
 }
 
-// called by main when an NFC tag is scanned: start that tag's task minigame
+// called by main when an NFC tag is scanned: start that tag's task minigame.
+// Allowed in LOBBY too so a single badge can test tasks without a full game.
 void gameOnNfc(const char *uid) {
   int mi = rosterIndexOfId(myId());
   bool alive = (mi < 0) || aliveIdx(mi);
-  if (phase == G_PLAYING && alive && !taskActive()) taskTryStart(uid);
+  if ((phase == G_PLAYING || phase == G_LOBBY) && alive && !taskActive()) taskTryStart(uid);
 }
 
 void gameUpdate() {
@@ -512,7 +513,7 @@ void gameUpdate() {
 
   // ---- task minigame overlay (local, during play only) ----
   if (taskActive()) {
-    if (phase != G_PLAYING) { taskCancel(); needRedraw = true; }
+    if (phase != G_PLAYING && phase != G_LOBBY) { taskCancel(); needRedraw = true; }
     else {
       taskUpdate();
       int jc = taskJustCompleted();
