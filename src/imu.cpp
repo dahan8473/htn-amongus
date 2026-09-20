@@ -6,43 +6,95 @@
 #define I2C_SCL 6
 #define SC7A20_ADDRESS 0x19
 
+// Helper function for safe I2C writes with retries
+bool writeRegister(uint8_t reg, uint8_t val) {
+  for (int i = 0; i < 3; i++) { // Max 3 attempts
+    Wire.beginTransmission(SC7A20_ADDRESS);
+    Wire.write(reg);
+    Wire.write(val);
+    if (Wire.endTransmission() == 0) return true;
+    delay(2); // Short backoff before retry
+  }
+  return false;
+}
+
+// Helper function for safe I2C single-byte reads with retries
+bool readRegister(uint8_t reg, uint8_t &val) {
+  for (int i = 0; i < 3; i++) {
+    Wire.beginTransmission(SC7A20_ADDRESS);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) continue;
+    
+    if (Wire.requestFrom((uint16_t)SC7A20_ADDRESS, (uint8_t)1) == 1) {
+      val = Wire.read();
+      return true;
+    }
+    delay(2);
+  }
+  return false;
+}
+
 bool setupIMU() {
   Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(400000); // Set to 400 kHz Fast Mode
+  Wire.setTimeOut(15);   // Enforce a 15ms hardware timeout to prevent infinite hanging
   
-  // Configure CTRL_REG1 (0x20): 100Hz ODR, Normal mode, X/Y/Z axes enabled (0x57)
-  Wire.beginTransmission(SC7A20_ADDRESS);
-  Wire.write(0x20); 
-  Wire.write(0x57); 
-  if (Wire.endTransmission() != 0) {
-    return false; // I2C communication failed
+  // Verify WHO_AM_I (0x0F) reads 0x11
+  uint8_t whoAmI = 0;
+  if (!readRegister(0x0F, whoAmI) || whoAmI != 0x11) {
+    return false; 
   }
   
-  // Configure CTRL_REG4 (0x23): Block Data Update enabled, High Resolution mode (0x88)
-  Wire.beginTransmission(SC7A20_ADDRESS);
-  Wire.write(0x23);
-  Wire.write(0x88);
-  Wire.endTransmission();
+  // CTRL_REG1 (0x20) = 0x57 -> 100 Hz, all axes on
+  if (!writeRegister(0x20, 0x57)) return false;
+  
+  // CTRL_REG4 (0x23) = 0x80 -> +/- 2g scale, continuous update
+  if (!writeRegister(0x23, 0x80)) return false;
   
   return true;
 }
 
 void getRollPitch(float &roll, float &pitch) {
-  // Read 6 bytes starting from OUT_X_L (0x28). 
-  // The MSB (0x80) must be set to auto-increment the register address during read.
-  Wire.beginTransmission(SC7A20_ADDRESS);
-  Wire.write(0x28 | 0x80); 
-  Wire.endTransmission(false); // Send repeated start
+  uint8_t status = 0;
+  bool dataReady = false;
   
-  Wire.requestFrom((uint16_t)SC7A20_ADDRESS, (uint8_t)6);
+  // Poll STATUS (0x27) for ZYXDA (bit 3) with a strict 5ms bounded timeout
+  uint32_t startPoll = millis();
+  while (millis() - startPoll < 5) {
+    if (readRegister(0x27, status) && (status & 0x08)) {
+      dataReady = true;
+      break;
+    }
+  }
   
-  if (Wire.available() == 6) {
-    // Read the 16-bit 2's complement left-justified data
-    int16_t x = Wire.read() | (Wire.read() << 8);
-    int16_t y = Wire.read() | (Wire.read() << 8);
-    int16_t z = Wire.read() | (Wire.read() << 8);
+  // If data isn't ready or bus is busy, abort and retain the previous roll/pitch values
+  if (!dataReady) return; 
+  
+  // Read 6 bytes from OUT_X_L (0x28) with auto-increment (MSB 0x80 set)
+  for (int i = 0; i < 3; i++) {
+    Wire.beginTransmission(SC7A20_ADDRESS);
+    Wire.write(0x28 | 0x80); 
+    if (Wire.endTransmission(false) != 0) continue;
     
-    // Calculate angles based on raw vector ratios
-    roll = atan2((float)y, (float)z) * 180.0 / PI;
-    pitch = atan2(-(float)x, sqrt((float)y * y + (float)z * z)) * 180.0 / PI;
+    if (Wire.requestFrom((uint16_t)SC7A20_ADDRESS, (uint8_t)6) == 6) {
+      // Reconstruct 16-bit left-justified data
+      int16_t x_raw = Wire.read() | (Wire.read() << 8);
+      int16_t y_raw = Wire.read() | (Wire.read() << 8);
+      int16_t z_raw = Wire.read() | (Wire.read() << 8);
+      
+      // Shift right by 4 bits to extract the 12-bit payload.
+      // Casting to signed int16_t first ensures the sign bit is preserved during shift.
+      // At +/- 2g, 1 count = 1 mg.
+      float x_mg = (float)(x_raw >> 4);
+      float y_mg = (float)(y_raw >> 4);
+      float z_mg = (float)(z_raw >> 4);
+      
+      // Calculate final angles
+      roll = atan2(y_mg, z_mg) * 180.0 / PI;
+      pitch = atan2(-x_mg, sqrt(y_mg * y_mg + z_mg * z_mg)) * 180.0 / PI;
+      
+      break; // Success, exit retry loop
+    }
+    delay(1); // Brief backoff if requestFrom fails
   }
 }
