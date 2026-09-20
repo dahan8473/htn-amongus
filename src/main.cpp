@@ -25,9 +25,11 @@ void setup() {
   setupDisplay();
   setupButtons();
 
-  // Hold START while booting -> solo task test mode; skip all networking.
+  // Hold A while booting -> solo task test mode; skip all networking.
+  // (Not START: START is GPIO9, the boot strapping pin -- holding it at reset
+  //  drops the chip into download mode instead of running firmware.)
   for (int i = 0; i < 6; i++) { updateButtons(); delay(12); }
-  testMode = isButtonHeld(BTN_START);
+  testMode = isButtonHeld(BTN_A);
 
   if (!testMode) {
     setupWiFi();
@@ -36,7 +38,7 @@ void setup() {
     setupGame();
     setupProximity(myId());  // ESP-NOW ranging for kills / body reports
   } else {
-    Serial.println("== TASK TEST MODE (hold START at boot to enter) ==");
+    Serial.println("== TASK TEST MODE (hold A at boot to enter) ==");
   }
 
   setupTasks();
