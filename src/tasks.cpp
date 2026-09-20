@@ -21,10 +21,10 @@ static int seq[6], seqPos, wireRound;      // 0: wires (multiple sequences)
 #define WIN_NCOLS 14
 #define WIN_GMAX  3.0f
 static float winGrime[WIN_NCOLS];   // remaining grime per column (0..WIN_GMAX)
-static int   winShade[WIN_NCOLS];   // last-drawn shade per column (so we only repaint on change)
+static int   winShade[WIN_NCOLS];   // last-drawn shade per column
 static float winSqX, winPrevSqX;    // squeegee left edge, px (prev = last drawn)
-static int   winSqDir;              // auto-sweep direction (+1 / -1)
-static float winWipeSm;            // smoothed shake force
+static float winCleaned;            // total grime scrubbed off (0 .. NCOLS*GMAX)
+static unsigned long winLastHit;    // debounce timer for shake detection
 static int   winPct;               // last-drawn percent
 static float navX, navY, navVX, navVY, navPX, navPY;   // 2: navigate (tilt-roll)
 static int navTX, navTY, navHits;
@@ -80,7 +80,7 @@ static void enterTask(int t) {
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) {
     for (int i = 0; i < WIN_NCOLS; i++) { winGrime[i] = WIN_GMAX; winShade[i] = -1; }
-    winSqX = 20; winPrevSqX = -1000; winSqDir = 1; winWipeSm = 0; winPct = -1;
+    winSqX = 20; winPrevSqX = -1000; winCleaned = 0; winLastHit = 0; winPct = -1;
   }
   else if (t == 2) {
     navX = navPX = 55; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
@@ -176,9 +176,10 @@ static void runWires() {
 #define WW     280
 #define WH     150
 #define WCOLW  (WW / WIN_NCOLS)   // 20 px
-#define WSQW   28
-#define WIPE_FORCE 0.42f          // shake force you must exceed before any grime lifts
-#define WIPE_SCRUB 1.05f          // how fast grime lifts once you're above WIPE_FORCE
+#define WSQW    28
+#define SHAKE_G  1.55f            // accel magnitude (g) a shake must beat to register
+#define SHAKE_MS 70               // min gap between counted shakes (debounce)
+#define HIT_AMT  1.2f             // grime scrubbed per shake (window total = NCOLS*GMAX)
 
 static uint16_t grimeColor(int shade) {
   switch (shade) {
@@ -235,42 +236,29 @@ static void runWindow() {
     drewStatic = true;
   }
 
-  // shake force: accel magnitude is ~1.0 at rest, spikes when you shake it
+  // each hard shake scrubs a chunk of grime (spike + debounce, the proven method)
   float mag = getAccelMagnitude();
-  float wipe = fabsf(mag - 1.0f);
-  winWipeSm = winWipeSm * 0.5f + wipe * 0.5f;
-
-  // squeegee auto-sweeps; the harder you shake, the faster it travels
-  float step = 0.3f + winWipeSm * 14.0f;
-  if (step > 24.0f) step = 24.0f;
-  winSqX += winSqDir * step;
-  if (winSqX <= WX) { winSqX = WX; winSqDir = 1; }
-  if (winSqX >= WX + WW - WSQW) { winSqX = WX + WW - WSQW; winSqDir = -1; }
-
-  // scrub only above the force threshold; harder shake lifts grime faster
-  int c0 = (int)((winSqX - WX) / WCOLW);
-  int c1 = (int)((winSqX + WSQW - WX) / WCOLW);
-  if (c0 < 0) c0 = 0;
-  if (c1 > WIN_NCOLS - 1) c1 = WIN_NCOLS - 1;
-  if (winWipeSm > WIPE_FORCE) {
-    float power = winWipeSm - WIPE_FORCE;
-    if (power > 1.0f) power = 1.0f;
-    for (int c = c0; c <= c1; c++) {
-      if (winGrime[c] > 0) {
-        winGrime[c] -= power * WIPE_SCRUB;
-        if (winGrime[c] < 0) winGrime[c] = 0;
-      }
-    }
+  if (mag > SHAKE_G && millis() - winLastHit > SHAKE_MS) {
+    winLastHit = millis();
+    winCleaned += HIT_AMT;
+    if (winCleaned > WIN_NCOLS * WIN_GMAX) winCleaned = WIN_NCOLS * WIN_GMAX;
+    flashLEDs(0, 120, 210, 60);   // blue blip: proof the shake registered
   }
 
-  // track shade changes for LEDs; the actual repaint happens via the slivers
+  // fill the window left -> right from how much you've scrubbed; refresh shades
   for (int c = 0; c < WIN_NCOLS; c++) {
-    int s = grimeShade(winGrime[c]);
-    if (s != winShade[c]) {
-      if (s == 0 && winShade[c] != 0) flashLEDs(0, 170, 0, 100);  // a pane came clean
-      winShade[c] = s;
-    }
+    float rem = WIN_GMAX - (winCleaned - c * WIN_GMAX);
+    if (rem < 0) rem = 0;
+    if (rem > WIN_GMAX) rem = WIN_GMAX;
+    winGrime[c] = rem;
+    int s = grimeShade(rem);
+    if (s != winShade[c]) winShade[c] = s;
   }
+
+  // squeegee rides the clean edge; low-passed for smooth motion
+  float frac = winCleaned / (WIN_NCOLS * WIN_GMAX);
+  float targetX = WX + frac * (WW - WSQW);
+  winSqX += (targetX - winSqX) * 0.30f;
 
   // move the squeegee by touching only the exposed/entered edges -> no flicker
   int nx = (int)(winSqX + 0.5f);
@@ -294,9 +282,7 @@ static void runWindow() {
   }
 
   // progress
-  float sum = 0;
-  for (int c = 0; c < WIN_NCOLS; c++) sum += winGrime[c];
-  int pct = (int)((WIN_NCOLS * WIN_GMAX - sum) / (WIN_NCOLS * WIN_GMAX) * 100.0f);
+  int pct = (int)(frac * 100.0f);
   if (pct != winPct) {
     winPct = pct;
     gfxFillRect(31, 206, 258, 14, gfxColor(40, 40, 60));
