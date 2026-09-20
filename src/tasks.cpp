@@ -15,7 +15,7 @@ static unsigned long taskStart = 0;
 static int justCompleted = -1;
 
 // per-minigame state
-static int seq[6], seqPos;                 // 0: wires
+static int seq[6], seqPos, wireRound;      // 0: wires (multiple sequences)
 static int shakeFill; static unsigned long lastShake;  // 1: shake
 static unsigned long levelSince;           // 2: stabilize
 static int calRound; static float calPos, calDir, calZoneL, calZoneW;  // 3: calibrate
@@ -50,7 +50,7 @@ static void enterTask(int t) {
   drewStatic = false;
   taskStart = millis();
   justCompleted = -1;
-  if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; }
+  if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) { shakeFill = 0; lastShake = 0; }
   else if (t == 2) { levelSince = 0; }
   else if (t == 3) { calRound = 0; calPos = 0; calDir = 2.2f; calZoneL = 62; calZoneW = 26; }
@@ -78,7 +78,8 @@ static void finish() {
 
 // ---- minigame renderers/updaters ----
 // input types: 0 UP, 1 DOWN, 2 LEFT, 3 RIGHT, 4 A, 5 B
-#define WIRE_LEN 5
+#define WIRE_LEN    5   // glyphs per sequence
+#define WIRE_ROUNDS 3   // sequences to complete for the whole task
 
 // draw one sequence glyph centered at (cx,cy): arrows for 0-3, letters for A/B
 static void drawGlyph(int cx, int cy, int type, uint16_t c) {
@@ -96,8 +97,9 @@ static void drawGlyph(int cx, int cy, int type, uint16_t c) {
 static void runWires() {
   if (!drewStatic) {
     gfxClear(NAVY);
-    gfxText(90, 18, 3, WHITE, "WIRES");
-    gfxText(30, 205, 2, DIM, "match the sequence");
+    gfxText(90, 14, 3, WHITE, "WIRES");
+    char r[16]; snprintf(r, sizeof(r), "Round %d/%d", wireRound + 1, WIRE_ROUNDS);
+    gfxText(105, 190, 2, DIM, r);
     drewStatic = true;
   }
   int d = -1;
@@ -108,12 +110,19 @@ static void runWires() {
   else if (isButtonPressed(BTN_A)) d = 4;
   else if (isButtonPressed(BTN_B)) d = 5;
   if (d >= 0 && d == seq[seqPos]) seqPos++;
-  if (seqPos >= WIRE_LEN) { finish(); return; }
+  if (seqPos >= WIRE_LEN) {
+    wireRound++;
+    if (wireRound >= WIRE_ROUNDS) { finish(); return; }
+    for (int i = 0; i < WIRE_LEN; i++) seq[i] = esp_random() % 6;  // next sequence
+    seqPos = 0;
+    drewStatic = false;   // redraw title + new round number
+    return;
+  }
   // arrow/button row (redraw on change)
-  gfxFillRect(10, 90, 300, 60, NAVY);
+  gfxFillRect(10, 95, 300, 60, NAVY);
   for (int i = 0; i < WIRE_LEN; i++) {
     uint16_t c = (i < seqPos) ? GREEN : (i == seqPos ? YELLOW : DIM);
-    drawGlyph(35 + i * 58, 120, seq[i], c);
+    drawGlyph(35 + i * 58, 125, seq[i], c);
   }
 }
 
