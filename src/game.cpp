@@ -144,6 +144,12 @@ static void hostStartGame() {
   int nImp = cfgImp; if (nImp >= n) nImp = 1; if (nImp < 1) nImp = 1;
   bool imp[MAX_PLAYERS] = { false };
   int chosen = 0;
+
+  // Whoever starts the game (the host) is always guaranteed to be an
+  // impostor; any additional impostor slots are randomized among the rest.
+  int hostIdx = rosterIndexOfId(myId());
+  if (hostIdx >= 0) { imp[hostIdx] = true; chosen++; }
+
   while (chosen < nImp && chosen < n) {
     int k = esp_random() % n;
     if (!imp[k]) { imp[k] = true; chosen++; }
