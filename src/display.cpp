@@ -119,29 +119,42 @@ void clearScreen() {
   tft.fillScreen(ST77XX_BLACK);
 }
 
-void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor) {
+// small crewmate glyph for the teammate list
+static void drawMiniMate(int cx, int cy, uint16_t body) {
+  tft.fillRoundRect(cx - 8, cy - 11, 16, 22, 6, body);
+  tft.fillRoundRect(cx - 6, cy - 7, 11, 5, 2, C_VISOR);
+}
+
+void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
+                  int nTeam, const uint8_t *teamR, const uint8_t *teamG,
+                  const uint8_t *teamB) {
   uint16_t bg = isImpostor ? tft.color565(40, 0, 0) : tft.color565(0, 10, 30);
   uint16_t banner = isImpostor ? C_RED : tft.color565(40, 90, 220);
   tft.fillScreen(bg);
 
-  // crewmate in the player's own profile color
-  drawCrewmate(80, 128, tft.color565(colorR, colorG, colorB));
+  // you, in your color
+  drawCrewmate(70, 120, tft.color565(colorR, colorG, colorB));
 
-  // role banner on the right
-  tft.fillRoundRect(150, 70, 158, 46, 8, banner);
+  tft.fillRoundRect(140, 40, 170, 46, 8, banner);
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextSize(3);
-  if (isImpostor) {
-    tft.setCursor(160, 82);
-    tft.print("IMPOSTOR");
-  } else {
-    tft.setCursor(160, 82);
-    tft.print("CREW");
-  }
+  tft.setCursor(150, 52);
+  tft.print(isImpostor ? "IMPOSTOR" : "CREW");
   tft.setTextColor(ST77XX_WHITE, bg);
   tft.setTextSize(2);
-  tft.setCursor(150, 140);
+  tft.setCursor(140, 100);
   tft.print(isImpostor ? "Sabotage & kill" : "Do your tasks");
+
+  // fellow impostors, if any
+  if (isImpostor && nTeam > 0) {
+    tft.setTextColor(tft.color565(255, 170, 170), bg);
+    tft.setTextSize(2);
+    tft.setCursor(140, 140);
+    tft.print("Team:");
+    for (int i = 0; i < nTeam && i < 6; i++) {
+      drawMiniMate(230 + i * 26, 150, tft.color565(teamR[i], teamG[i], teamB[i]));
+    }
+  }
 }
 
 void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
@@ -255,26 +268,47 @@ void showVote(const char *name, int colorR, int colorG, int colorB,
   tft.print(buf);
 }
 
-void showEjectResult(const char *name, int colorR, int colorG, int colorB,
-                     bool skipped, bool wasImpostor) {
+void showResult(const char *ejName, int ejR, int ejG, int ejB,
+                bool skipped, bool wasImpostor,
+                int nTally, const uint8_t *talR, const uint8_t *talG,
+                const uint8_t *talB, const int *talCounts, int skipCount) {
   tft.fillScreen(C_NAVY);
+  // ejection line at the top
+  tft.setTextSize(2);
   if (skipped) {
     tft.setTextColor(ST77XX_WHITE, C_NAVY);
-    tft.setTextSize(2);
-    tft.setCursor(30, 110);
+    tft.setCursor(20, 18);
     tft.print("No one was ejected");
-    return;
+  } else {
+    tft.setTextColor(tft.color565(ejR, ejG, ejB), C_NAVY);
+    tft.setCursor(20, 14);
+    tft.print(ejName);
+    tft.setTextColor(ST77XX_WHITE, C_NAVY);
+    tft.setCursor(20, 40);
+    tft.print("ejected -");
+    tft.setTextColor(wasImpostor ? tft.color565(80, 220, 120) : C_RED, C_NAVY);
+    tft.setCursor(140, 40);
+    tft.print(wasImpostor ? "Impostor" : "innocent");
   }
-  drawCrewmate(80, 120, tft.color565(colorR, colorG, colorB));
-  tft.setTextColor(tft.color565(colorR, colorG, colorB));
-  tft.setTextSize(3);
-  tft.setCursor(150, 80);
-  tft.print(name);
-  tft.setTextColor(ST77XX_WHITE, C_NAVY);
-  tft.setTextSize(2);
-  tft.setCursor(150, 120);
-  tft.print("was ejected");
-  tft.setTextColor(wasImpostor ? tft.color565(80, 220, 120) : C_RED, C_NAVY);
-  tft.setCursor(150, 150);
-  tft.print(wasImpostor ? "An Impostor!" : "not Impostor");
+  // tally row
+  tft.setTextColor(tft.color565(185, 185, 205), C_NAVY);
+  tft.setCursor(20, 90);
+  tft.print("Votes");
+  int x = 20, y = 135;
+  for (int i = 0; i < nTally && i < 6; i++) {
+    drawMiniMate(x + 12, y, tft.color565(talR[i], talG[i], talB[i]));
+    tft.setTextColor(ST77XX_WHITE, C_NAVY);
+    tft.setCursor(x + 6, y + 20);
+    char b[6]; snprintf(b, sizeof(b), "%d", talCounts[i]);
+    tft.print(b);
+    x += 46;
+  }
+  if (skipCount > 0) {
+    tft.setTextColor(tft.color565(150, 150, 170), C_NAVY);
+    tft.setCursor(x, y - 4);
+    tft.print("skip");
+    tft.setCursor(x + 6, y + 20);
+    char b[6]; snprintf(b, sizeof(b), "%d", skipCount);
+    tft.print(b);
+  }
 }

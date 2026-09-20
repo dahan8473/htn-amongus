@@ -11,9 +11,12 @@ void showMeetingWaiting();
 void showMeetingCountdown(int secondsLeft);
 void clearScreen();
 
-// Role reveal card: a crewmate in the player's color, with CREWMATE (blue) or
-// IMPOSTOR (red) banner. r/g/b is the player's profile color.
-void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor);
+// Role reveal card: a crewmate in the player's color, CREWMATE (blue) or
+// IMPOSTOR (red) banner. If impostor, small crewmate icons for each teammate
+// color are drawn on the left so you know your fellow impostors.
+void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor,
+                  int nTeam, const uint8_t *teamR, const uint8_t *teamG,
+                  const uint8_t *teamB);
 
 // Lobby: AMONG US logo, crewmate in your color, player count, and the
 // host-adjustable settings list with a cursor on row `sel`.
@@ -28,9 +31,12 @@ void showHUD(bool alive, int aliveCount, int colorR, int colorG, int colorB);
 void showVote(const char *name, int colorR, int colorG, int colorB,
               bool isSkip, int secondsLeft, bool alreadyVoted);
 
-// Result of a vote: who was ejected (with impostor reveal), or skipped.
-void showEjectResult(const char *name, int colorR, int colorG, int colorB,
-                     bool skipped, bool wasImpostor);
+// Result of a vote: who was ejected (+ impostor reveal, or skipped), plus a
+// tally row of mini color icons with how many votes each color got.
+void showResult(const char *ejName, int ejR, int ejG, int ejB,
+                bool skipped, bool wasImpostor,
+                int nTally, const uint8_t *talR, const uint8_t *talG,
+                const uint8_t *talB, const int *talCounts, int skipCount);
 
 // Winner screen.
 void showGameOver(bool crewWon);

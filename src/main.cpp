@@ -9,6 +9,7 @@
 #include "nfc.h"
 #include "players.h"
 #include "game.h"
+#include "ble_prox.h"
 
 unsigned long lastPresence = 0;
 bool nfcEnabled = false;
@@ -23,6 +24,7 @@ void setup() {
   setupButtons();
   setupPlayers();
   setupGame();
+  setupProximity(myId());  // BLE ranging for kills / body reports
 
   powerDownNFC();  // NFC starts off to save power
 
@@ -63,6 +65,8 @@ void loop() {
     String uid = scanNFC();
     if (uid != "") { Serial.print("Task UID: "); Serial.println(uid); }
   }
+
+  updateProximity();  // keep BLE scanning alive
 
   // the state machine owns input handling and all rendering
   gameUpdate();
