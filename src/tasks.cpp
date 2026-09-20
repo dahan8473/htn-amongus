@@ -47,6 +47,8 @@ static int uidToTask(const char *uid) {
   return h % NUM_TASKS;
 }
 
+static void newChute();  // defined with the garbage minigame below
+
 static void enterTask(int t) {
   curTask = t;
   drewStatic = false;
@@ -55,8 +57,8 @@ static void enterTask(int t) {
   if (t == 0) { for (int i = 0; i < 5; i++) seq[i] = esp_random() % 6; seqPos = 0; wireRound = 0; }
   else if (t == 1) { shakeFill = 0; lastShake = 0; }
   else if (t == 2) {
-    navX = navPX = 160; navY = navPY = 135; navVX = navVY = 0; navHits = 0;
-    navTX = 40 + esp_random() % 240; navTY = 60 + esp_random() % 150;
+    navX = navPX = 60; navY = navPY = 185; navVX = navVY = 0; navHits = 0;
+    newChute();
   }
   else if (t == 3) { calRound = 0; calPos = 0; calDir = 2.2f; calZoneL = 62; calZoneW = 26; }
 }
@@ -141,44 +143,68 @@ static void runShake() {
   gfxRectOutline(30, 110, 260, 30, WHITE);
 }
 
-static void newNavTarget() {
-  navTX = 40 + esp_random() % 240;
-  navTY = 60 + esp_random() % 150;
+// walls the trash must navigate around
+struct Wall { int x, y, w, h; };
+static const Wall WALLS[] = { { 10, 96, 120, 14 }, { 190, 150, 120, 14 }, { 150, 44, 14, 74 } };
+static const int NWALLS = 3;
+#define BALL_R 8
+
+static bool hitsWall(float x, float y) {
+  for (int i = 0; i < NWALLS; i++) {
+    const Wall &w = WALLS[i];
+    if (x + BALL_R > w.x && x - BALL_R < w.x + w.w &&
+        y + BALL_R > w.y && y - BALL_R < w.y + w.h) return true;
+  }
+  return false;
 }
 
-static void runNavigate() {
+static void newChute() {
+  do {
+    navTX = 40 + esp_random() % 240;
+    navTY = 60 + esp_random() % 140;
+  } while (hitsWall(navTX, navTY) || (abs(navTX - (int)navX) < 40 && abs(navTY - (int)navY) < 40));
+}
+
+static void runGarbage() {
   if (!drewStatic) {
     gfxClear(NAVY);
-    gfxText(40, 10, 3, WHITE, "NAVIGATE");
-    gfxText(20, 218, 2, DIM, "tilt the ball to targets");
+    gfxText(30, 8, 3, WHITE, "GARBAGE");
+    gfxText(10, 222, 2, DIM, "tilt trash to the chute");
     drewStatic = true;
   }
   float r, p; getRollPitch(r, p);
-  navVX += p * 0.06f; navVY += r * 0.06f;      // tilt accelerates the ball
-  navVX *= 0.90f; navVY *= 0.90f;              // friction
-  navX += navVX; navY += navVY;
-  if (navX < 20) { navX = 20; navVX = -navVX * 0.5f; }
-  if (navX > 300) { navX = 300; navVX = -navVX * 0.5f; }
-  if (navY < 45) { navY = 45; navVY = -navVY * 0.5f; }
-  if (navY > 205) { navY = 205; navVY = -navVY * 0.5f; }
+  navVX += p * 0.06f; navVY += r * 0.06f;   // tilt accelerates the trash
+  navVX *= 0.90f; navVY *= 0.90f;           // friction
+
+  // move per-axis so the trash slides along walls instead of sticking
+  float nx = navX + navVX;
+  if (nx < 18) { nx = 18; navVX = -navVX * 0.5f; }
+  if (nx > 302) { nx = 302; navVX = -navVX * 0.5f; }
+  if (!hitsWall(nx, navY)) navX = nx; else navVX = -navVX * 0.3f;
+  float ny = navY + navVY;
+  if (ny < 40) { ny = 40; navVY = -navVY * 0.5f; }
+  if (ny > 210) { ny = 210; navVY = -navVY * 0.5f; }
+  if (!hitsWall(navX, ny)) navY = ny; else navVY = -navVY * 0.3f;
 
   float dx = navX - navTX, dy = navY - navTY;
-  if (dx * dx + dy * dy < 22 * 22) {           // reached the target
+  if (dx * dx + dy * dy < 22 * 22) {        // trash reached the chute
     navHits++;
-    flashLEDs(0, 200, 0, 250);                 // green hit flash
+    flashLEDs(0, 200, 0, 250);
     if (navHits >= 3) { finish(); return; }
-    newNavTarget();
-    drewStatic = false;                        // repaint (clears old target)
+    newChute();
+    drewStatic = false;
     return;
   }
 
-  gfxFillCircle((int)navPX, (int)navPY, 9, NAVY);   // erase old ball
-  gfxFillCircle(navTX, navTY, 14, YELLOW);          // target
-  gfxFillCircle((int)navX, (int)navY, 8, gfxColor(60, 200, 210));  // ball
+  gfxFillCircle((int)navPX, (int)navPY, 9, NAVY);          // erase old trash
+  for (int i = 0; i < NWALLS; i++) gfxFillRect(WALLS[i].x, WALLS[i].y, WALLS[i].w, WALLS[i].h, gfxColor(110, 110, 125));
+  gfxFillRect(navTX - 14, navTY - 14, 28, 28, gfxColor(30, 120, 40));  // chute
+  gfxRectOutline(navTX - 14, navTY - 14, 28, 28, GREEN);
+  gfxFillCircle((int)navX, (int)navY, BALL_R, gfxColor(150, 120, 80));  // trash
   navPX = navX; navPY = navY;
   char h[12]; snprintf(h, sizeof(h), "%d/3", navHits);
-  gfxFillRect(280, 40, 36, 20, NAVY);
-  gfxText(280, 42, 2, GREEN, h);
+  gfxFillRect(282, 34, 36, 20, NAVY);
+  gfxText(284, 36, 2, GREEN, h);
 }
 
 static void runCalibrate() {
@@ -211,7 +237,7 @@ void taskUpdate() {
   switch (curTask) {
     case 0: runWires(); break;
     case 1: runShake(); break;
-    case 2: runNavigate(); break;
+    case 2: runGarbage(); break;
     case 3: runCalibrate(); break;
   }
 }
