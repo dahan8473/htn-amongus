@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <math.h>
 #include <string.h>
 #include "espnow_prox.h"
 #include "espnow_radio.h"
@@ -97,14 +98,28 @@ void debugProximity() {
   portEXIT_CRITICAL(&recMux);
 
   Serial.print("PROX");
+  if (count == 0) {
+    Serial.println(" none");
+    return;
+  }
   unsigned long now = millis();
   for (int i = 0; i < count; i++) {
     if (!snapshot[i].initialized) continue;
     Serial.print(" ");
     Serial.print(snapshot[i].id);
     Serial.print("=");
-    if (now - snapshot[i].ms < PROX_STALE_MS) Serial.print(snapshot[i].rssi);
-    else Serial.print("stale");
+    if (now - snapshot[i].ms < PROX_STALE_MS) {
+      Serial.print(snapshot[i].rssi);
+      // Very rough free-space/path-loss estimate. RSSI is not a tape measure;
+      // these constants are only useful as a starting point for calibration.
+      const float rssiAtOneMeter = -55.0f;
+      const float pathLossExponent = 2.5f;
+      float metres = powf(10.0f,
+        (rssiAtOneMeter - snapshot[i].rssi) / (10.0f * pathLossExponent));
+      Serial.print("dBm(~");
+      Serial.print(metres, 1);
+      Serial.print("m)");
+    } else Serial.print("stale");
   }
   Serial.println();
 }
