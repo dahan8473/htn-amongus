@@ -1,4 +1,4 @@
 #pragma once
 
 void setupDisplay();
-void updateDisplay(float roll, float pitch);
+void updateDisplay(float x, float y, bool nfcEnabled);

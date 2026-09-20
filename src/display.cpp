@@ -10,41 +10,46 @@
 #define TFT_DC   0
 #define TFT_RST  4
 
-#define ST7789_MADCTL 0x36
-
 Adafruit_ST7789 tft = Adafruit_ST7789(&SPI, TFT_CS, TFT_DC, TFT_RST);
 
 void setupDisplay() {
   SPI.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
   
   tft.init(240, 320); 
-  
-  // Try rotation 3 first (flips the screen 180 degrees)
   tft.setRotation(3); 
-  
-  // UNCOMMENT the following 3 lines ONLY if the text is mirrored backward:
-  // tft.sendCommand(ST7789_MADCTL);
-  // uint8_t madctl_mirrored_y = 0x60; // Adjusts Row/Column addressing
-  // tft.spiWrite(madctl_mirrored_y);
   
   tft.fillScreen(ST77XX_BLACK);
   tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK); 
   tft.setTextSize(3);
 }
 
-void updateDisplay(float roll, float pitch) {
-  // We use dtostrf to ensure the strings are always the exact same width,
-  // preventing old text from ghosting when the numbers shrink.
-  char rollStr[10];
-  char pitchStr[10];
-  dtostrf(roll, 6, 1, rollStr);
-  dtostrf(pitch, 6, 1, pitchStr);
+void updateDisplay(float x, float y, bool nfcEnabled) {
+  char xStr[10];
+  char yStr[10];
+  dtostrf(x, 6, 1, xStr);
+  dtostrf(y, 6, 1, yStr);
 
-  tft.setCursor(20, 60);
-  tft.print("Roll:  ");
-  tft.print(rollStr);
+  tft.setCursor(20, 40);
+  tft.print("X: ");
+  tft.print(xStr);
   
-  tft.setCursor(20, 120);
-  tft.print("Pitch: ");
-  tft.print(pitchStr);
+  tft.setCursor(20, 100);
+  tft.print("Y: ");
+  tft.print(yStr);
+
+  tft.setCursor(20, 160);
+  tft.print("NFC: ");
+  
+  // Use color to indicate state, with a trailing space on "ON " 
+  // so it fully overwrites the "FF" from "OFF" when toggling
+  if (nfcEnabled) {
+    tft.setTextColor(ST77XX_GREEN, ST77XX_BLACK);
+    tft.print("ON ");
+  } else {
+    tft.setTextColor(ST77XX_RED, ST77XX_BLACK);
+    tft.print("OFF");
+  }
+  
+  // Reset text color back to white for the next loop's X/Y text
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK); 
 }
