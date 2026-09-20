@@ -5,7 +5,6 @@
 #include "players.h"
 #include "broadcast.h"
 
-// Among Us-style palette. Index is what badges exchange over the network.
 static const PlayerColor COLORS[] = {
   { "Red",    197, 27,  27  },
   { "Blue",   40,  80,  230 },
@@ -21,7 +20,14 @@ static const int NCOLORS = sizeof(COLORS) / sizeof(COLORS[0]);
 static char s_myId[ID_LEN];
 static int s_myColor = 0;
 
-struct RosterEntry { char id[ID_LEN]; int colorIdx; unsigned long lastSeen; };
+struct RosterEntry {
+  char id[ID_LEN];
+  int colorIdx;
+  bool alive;
+  int role;
+  int meetings;
+  unsigned long lastSeen;
+};
 static RosterEntry roster[MAX_PLAYERS];
 static int nRoster = 0;
 
@@ -29,11 +35,9 @@ void setupPlayers() {
   uint8_t mac[6];
   WiFi.macAddress(mac);
   snprintf(s_myId, sizeof(s_myId), "%02X%02X", mac[4], mac[5]);
-  // stable color from the whole MAC
   uint32_t h = 0;
   for (int i = 0; i < 6; i++) h = h * 31 + mac[i];
   s_myColor = h % NCOLORS;
-  // seed our own entry so we always appear in the roster
   notePresence(s_myId, s_myColor);
 }
 
@@ -60,6 +64,9 @@ void notePresence(const char *id, int colorIdx) {
     strncpy(roster[nRoster].id, id, ID_LEN);
     roster[nRoster].id[ID_LEN - 1] = '\0';
     roster[nRoster].colorIdx = colorIdx;
+    roster[nRoster].alive = true;
+    roster[nRoster].role = ROLE_NONE;
+    roster[nRoster].meetings = 0;
     roster[nRoster].lastSeen = millis();
     nRoster++;
   }
@@ -68,9 +75,60 @@ void notePresence(const char *id, int colorIdx) {
 int rosterCount() { return nRoster; }
 const char *rosterId(int i) { return roster[i].id; }
 int rosterColorIndex(int i) { return roster[i].colorIdx; }
-
 int rosterIndexOfId(const char *id) {
   for (int i = 0; i < nRoster; i++)
     if (strncmp(roster[i].id, id, ID_LEN) == 0) return i;
   return -1;
+}
+
+void resetPlayerStates() {
+  for (int i = 0; i < nRoster; i++) {
+    roster[i].alive = true;
+    roster[i].role = ROLE_NONE;
+    roster[i].meetings = 0;
+  }
+}
+
+bool aliveIdx(int i) { return roster[i].alive; }
+
+void setAliveId(const char *id, bool a) {
+  int i = rosterIndexOfId(id);
+  if (i >= 0) roster[i].alive = a;
+}
+
+void setAliveList(const char *csv) {
+  // everyone not named in the list becomes dead
+  for (int i = 0; i < nRoster; i++) roster[i].alive = false;
+  char buf[128];
+  strncpy(buf, csv, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+  char *tok = strtok(buf, ",");
+  while (tok) {
+    int i = rosterIndexOfId(tok);
+    if (i >= 0) roster[i].alive = true;
+    tok = strtok(NULL, ",");
+  }
+}
+
+int roleIdx(int i) { return roster[i].role; }
+void setRoleId(const char *id, int role) {
+  int i = rosterIndexOfId(id);
+  if (i >= 0) roster[i].role = role;
+}
+
+int meetingsIdx(int i) { return roster[i].meetings; }
+void incMeetingsId(const char *id) {
+  int i = rosterIndexOfId(id);
+  if (i >= 0) roster[i].meetings++;
+}
+
+int aliveCount() {
+  int n = 0;
+  for (int i = 0; i < nRoster; i++) if (roster[i].alive) n++;
+  return n;
+}
+int aliveRoleCount(int role) {
+  int n = 0;
+  for (int i = 0; i < nRoster; i++) if (roster[i].alive && roster[i].role == role) n++;
+  return n;
 }

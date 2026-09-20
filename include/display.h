@@ -15,13 +15,22 @@ void clearScreen();
 // IMPOSTOR (red) banner. r/g/b is the player's profile color.
 void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor);
 
-// Title / lobby screen: AMONG US logo, a crewmate in your color, player count.
-void showTitleScreen(int players, int colorR, int colorG, int colorB);
+// Lobby: AMONG US logo, crewmate in your color, player count, and the
+// host-adjustable settings list with a cursor on row `sel`.
+void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
+               int colorR, int colorG, int colorB);
+
+// In-game status: your crewmate, alive count, role hint (or GHOST if dead).
+void showHUD(bool alive, bool isImpostor, int aliveCount,
+             int colorR, int colorG, int colorB);
 
 // Voting screen: the current pick (a color, or SKIP), countdown, and hints.
 void showVote(const char *name, int colorR, int colorG, int colorB,
               bool isSkip, int secondsLeft, bool alreadyVoted);
 
-// Result of a vote: who got ejected (or that it was skipped).
+// Result of a vote: who was ejected (with impostor reveal), or skipped.
 void showEjectResult(const char *name, int colorR, int colorG, int colorB,
-                     bool skipped);
+                     bool skipped, bool wasImpostor);
+
+// Winner screen.
+void showGameOver(bool crewWon);

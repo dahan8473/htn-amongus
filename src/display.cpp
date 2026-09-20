@@ -144,23 +144,80 @@ void showRoleCard(int colorR, int colorG, int colorB, bool isImpostor) {
   tft.print(isImpostor ? "Sabotage & kill" : "Do your tasks");
 }
 
-void showTitleScreen(int players, int colorR, int colorG, int colorB) {
+void showLobby(int players, int imp, int disc, int vote, int meet, int sel,
+               int colorR, int colorG, int colorB) {
   tft.fillScreen(C_NAVY);
-  drawCrewmate(66, 132, tft.color565(colorR, colorG, colorB));
   tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(4);
-  tft.setCursor(120, 40);
-  tft.print("AMONG");
-  tft.setCursor(150, 82);
-  tft.print("US");
-  tft.setTextColor(tft.color565(185, 185, 205), C_NAVY);
+  tft.setTextSize(3);
+  tft.setCursor(20, 10);
+  tft.print("AMONG US");
+  drawCrewmate(285, 30, tft.color565(colorR, colorG, colorB));
+
+  const char *labels[4];
+  char rows[4][20];
+  snprintf(rows[0], 20, "Impostors: %d", imp);
+  snprintf(rows[1], 20, "Discuss: %ds", disc);
+  snprintf(rows[2], 20, "Vote: %ds", vote);
+  snprintf(rows[3], 20, "Meetings: %d", meet);
+  for (int i = 0; i < 4; i++) labels[i] = rows[i];
+
   tft.setTextSize(2);
-  char buf[24];
-  snprintf(buf, sizeof(buf), "Players: %d  ", players);
-  tft.setCursor(120, 140);
-  tft.print(buf);
-  tft.setCursor(120, 170);
-  tft.print("START to begin");
+  for (int i = 0; i < 4; i++) {
+    int y = 55 + i * 26;
+    if (i == sel) { tft.setTextColor(tft.color565(240, 220, 60), C_NAVY); tft.setCursor(6, y); tft.print(">"); }
+    else tft.setTextColor(tft.color565(190, 190, 210), C_NAVY);
+    tft.setCursor(24, y);
+    tft.print(labels[i]);
+  }
+
+  tft.setTextColor(ST77XX_WHITE, C_NAVY);
+  tft.setCursor(20, 178);
+  char f[24]; snprintf(f, sizeof(f), "Players: %d", players);
+  tft.print(f);
+  tft.setTextColor(tft.color565(240, 220, 60), C_NAVY);
+  tft.setCursor(20, 205);
+  tft.print("START = play");
+}
+
+void showHUD(bool alive, bool isImpostor, int aliveCount,
+             int colorR, int colorG, int colorB) {
+  tft.fillScreen(C_NAVY);
+  if (!alive) {
+    drawCrewmate(80, 120, tft.color565(70, 70, 80));  // grey ghost
+    tft.setTextColor(tft.color565(160, 160, 175), C_NAVY);
+    tft.setTextSize(3);
+    tft.setCursor(150, 100);
+    tft.print("GHOST");
+    tft.setTextSize(2);
+    tft.setCursor(150, 140);
+    tft.print("spectating");
+    return;
+  }
+  drawCrewmate(70, 120, tft.color565(colorR, colorG, colorB));
+  tft.setTextColor(isImpostor ? C_RED : tft.color565(60, 140, 230));
+  tft.setTextSize(3);
+  tft.setCursor(150, 60);
+  tft.print(isImpostor ? "IMPOSTOR" : "CREW");
+  tft.setTextColor(tft.color565(190, 190, 210), C_NAVY);
+  tft.setTextSize(2);
+  char b[20]; snprintf(b, sizeof(b), "Alive: %d ", aliveCount);
+  tft.setCursor(150, 110);
+  tft.print(b);
+  tft.setTextColor(tft.color565(150, 150, 170), C_NAVY);
+  tft.setCursor(20, 205);
+  tft.print("START=meeting  A=role");
+}
+
+void showGameOver(bool crewWon) {
+  tft.fillScreen(crewWon ? tft.color565(0, 20, 45) : tft.color565(40, 0, 0));
+  tft.setTextColor(crewWon ? tft.color565(70, 160, 240) : C_RED);
+  tft.setTextSize(4);
+  if (crewWon) { tft.setCursor(40, 70); tft.print("CREW"); tft.setCursor(40, 115); tft.print("WINS!"); }
+  else { tft.setCursor(10, 70); tft.print("IMPOSTOR"); tft.setCursor(70, 115); tft.print("WINS"); }
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(20, 205);
+  tft.print("START = new lobby");
 }
 
 void showVote(const char *name, int colorR, int colorG, int colorB,
@@ -197,22 +254,25 @@ void showVote(const char *name, int colorR, int colorG, int colorB,
 }
 
 void showEjectResult(const char *name, int colorR, int colorG, int colorB,
-                     bool skipped) {
+                     bool skipped, bool wasImpostor) {
   tft.fillScreen(C_NAVY);
   if (skipped) {
     tft.setTextColor(ST77XX_WHITE, C_NAVY);
     tft.setTextSize(2);
     tft.setCursor(30, 110);
     tft.print("No one was ejected");
-  } else {
-    drawCrewmate(80, 120, tft.color565(colorR, colorG, colorB));
-    tft.setTextColor(tft.color565(colorR, colorG, colorB));
-    tft.setTextSize(3);
-    tft.setCursor(150, 92);
-    tft.print(name);
-    tft.setTextColor(ST77XX_WHITE);
-    tft.setTextSize(2);
-    tft.setCursor(150, 132);
-    tft.print("was ejected");
+    return;
   }
+  drawCrewmate(80, 120, tft.color565(colorR, colorG, colorB));
+  tft.setTextColor(tft.color565(colorR, colorG, colorB));
+  tft.setTextSize(3);
+  tft.setCursor(150, 80);
+  tft.print(name);
+  tft.setTextColor(ST77XX_WHITE, C_NAVY);
+  tft.setTextSize(2);
+  tft.setCursor(150, 120);
+  tft.print("was ejected");
+  tft.setTextColor(wasImpostor ? tft.color565(80, 220, 120) : C_RED, C_NAVY);
+  tft.setCursor(150, 150);
+  tft.print(wasImpostor ? "An Impostor!" : "not Impostor");
 }
