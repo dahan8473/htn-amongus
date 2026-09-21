@@ -646,6 +646,12 @@ void gameUpdate() {
   // ---- task minigame overlay (local, during play only) ----
   if (taskActive()) {
     if (phase != G_PLAYING && phase != G_LOBBY) { taskCancel(); needRedraw = true; }
+    else if (isButtonPressed(BTN_START)) {
+      // START is reserved as the task back button while a minigame is active.
+      // The press is consumed here, so it cannot also reveal the role card.
+      taskCancel();
+      needRedraw = true;
+    }
     else {
       taskUpdate();
       int jc = taskJustCompleted();
