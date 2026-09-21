@@ -23,37 +23,6 @@ void setupDisplay() {
   tft.setTextSize(3);
 }
 
-void updateDisplay(float x, float y, bool nfcEnabled) {
-  char xStr[10];
-  char yStr[10];
-  dtostrf(x, 6, 1, xStr);
-  dtostrf(y, 6, 1, yStr);
-
-  tft.setCursor(20, 40);
-  tft.print("X: ");
-  tft.print(xStr);
-
-  tft.setCursor(20, 100);
-  tft.print("Y: ");
-  tft.print(yStr);
-
-  tft.setCursor(20, 160);
-  tft.print("NFC: ");
-
-  // Use color to indicate state, with a trailing space on "ON "
-  // so it fully overwrites the "FF" from "OFF" when toggling
-  if (nfcEnabled) {
-    tft.setTextColor(ST77XX_GREEN, ST77XX_BLACK);
-    tft.print("ON ");
-  } else {
-    tft.setTextColor(ST77XX_RED, ST77XX_BLACK);
-    tft.print("OFF");
-  }
-
-  // Reset text color back to white for the next loop's X/Y text
-  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
-}
-
 // Among Us-style palette
 #define C_NAVY   tft.color565(10, 12, 34)
 #define C_RED    tft.color565(197, 27, 27)

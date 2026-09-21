@@ -1,7 +1,6 @@
 #pragma once
 
 void setupDisplay();
-void updateDisplay(float x, float y, bool nfcEnabled);
 
 // Emergency meeting screen: draw the static banner once, then either the
 // "waiting for A" prompt (gather) or the countdown (discuss). clearScreen()

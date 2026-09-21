@@ -7,7 +7,6 @@
 #include "buttons.h"
 #include "broadcast.h"
 #include "display.h"
-#include "imu.h"
 #include "leds.h"
 #include "espnow_prox.h"
 #include "tasks.h"
@@ -46,7 +45,7 @@ static bool startPrevHeld = false;
 static bool startIsReveal = false;
 static bool revealActive = false;
 
-// HOME: quick tap calls a meeting; hold shows the dev debug screen
+// HOME: quick tap calls a meeting; holding it does nothing
 static unsigned long homeDownAt = 0;
 static bool homePrevHeld = false;
 static bool homeIsHold = false;
@@ -634,7 +633,7 @@ void gameUpdate() {
     broadcastMessage(m);
   }
 
-  // HOME: quick tap = emergency meeting; hold = dev debug screen.
+  // HOME: quick tap = emergency meeting; holding it does nothing.
   bool homeHeld = isButtonHeld(BTN_HOME);
   if (isButtonPressed(BTN_HOME)) { homeDownAt = millis(); homeIsHold = false; }
   if (homeHeld && !homeIsHold && millis() - homeDownAt > 350) homeIsHold = true;
@@ -642,12 +641,6 @@ void gameUpdate() {
   if (homePrevHeld && !homeHeld) { if (!homeIsHold) homeTapped = true; }
   homePrevHeld = homeHeld;
 
-  if (homeHeld && homeIsHold) {           // hold HOME -> debug readouts
-    float x = 0, y = 0; getRollPitch(x, y);
-    updateDisplay(x, y, false);
-    needRedraw = true;
-    return;
-  }
   if (homeTapped && phase == G_PLAYING) callMeeting();  // tap HOME -> meeting
 
   // ---- task minigame overlay (local, during play only) ----
