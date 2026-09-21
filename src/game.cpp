@@ -299,7 +299,6 @@ static void hostKill(const char *killer, const char *target) {
   if (ki < 0 || ti < 0) return;
   if (roleIdx(ki) != ROLE_IMP || !aliveIdx(ki)) return;
   if (!aliveIdx(ti) || roleIdx(ti) == ROLE_IMP) return;
-  if (immortalIdx(ti)) return;  // demo-mode: impervious to kills
   if (millis() - lastKillMs[ki] < KILL_CD_MS) return;
   lastKillMs[ki] = millis();
   setAliveId(target, false);
@@ -443,9 +442,6 @@ void gameHandleMessage(const char *msg) {
     setAliveId(id, false);
     if (strcmp(id, myId()) == 0) killedFlashUntil = millis() + 1500;
     needRedraw = true;
-  } else if (strncmp(msg, "IMM:", 4) == 0) {
-    char id[ID_LEN]; int val = 0;
-    if (sscanf(msg, "IMM:%4[^:]:%d", id, &val) == 2) setImmortalId(id, val != 0);
   }
   // ---- host acts on requests ----
   else if (isHost && strncmp(msg, "KILL:", 5) == 0) {
@@ -517,7 +513,7 @@ static const char *nearestKillTarget() {
   const char *best = nullptr; int bestR = KILL_RSSI - 1;
   for (int i = 0; i < rosterCount(); i++) {
     const char *id = rosterId(i);
-    if (strcmp(id, myId()) == 0 || !aliveIdx(i) || isTeammate(id) || immortalIdx(i)) continue;
+    if (strcmp(id, myId()) == 0 || !aliveIdx(i) || isTeammate(id)) continue;
     int r = proximityRssi(id);
     if (r >= KILL_RSSI && r > bestR) { bestR = r; best = id; }
   }

@@ -8,31 +8,39 @@
 
 // In this specific library fork, the MFRC522 class handles I2C natively
 MFRC522 mfrc522(NFC_ADDRESS, RST_PIN);
+static bool nfcInitialized = false;
 
-void beginNFCScan() {
-  // Manual Soft Power Up: Clear the PowerDown bit (bit 4) in CommandReg (0x01)
-  mfrc522.PCD_ClearRegisterBitMask(mfrc522.CommandReg, (1<<4));
-
-  // The oscillator needs a moment to stabilize after waking up
-  delay(50);
-
-  // Re-initialize registers after waking up
+void setupNFC() {
+  // Configure the reader once. Later AUX1 toggles use the retained soft
+  // power-down state instead of resetting/reinitializing the chip in-game.
   mfrc522.PCD_Init();
+  nfcInitialized = true;
+  powerDownNFC();
 
-  // Diagnostic: confirm the reader chip itself is actually responding on I2C.
-  // A real MFRC522 reports 0x91 or 0x92 here; 0x00 or 0xFF means the chip
-  // isn't answering (wiring/power/address problem), regardless of any tag.
   byte version = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
   Serial.print("NFC reader VersionReg=0x");
   Serial.println(version, HEX);
 }
 
+void beginNFCScan() {
+  if (!nfcInitialized) {
+    setupNFC();
+  }
+
+  // Manual soft wake: clear PowerDown while retaining the configured reader
+  // registers, then enable the RF driver. No hardware reset or full PCD_Init
+  // is performed when the switch changes during a game.
+  mfrc522.PCD_ClearRegisterBitMask(mfrc522.CommandReg, (1<<4));
+  delay(2);
+  mfrc522.PCD_AntennaOn();
+}
+
 void powerDownNFC() {
-  // Turn off the antenna to save power
+  // Put the reader into low-power standby without cutting its supply. The
+  // antenna is disabled first, then the MFRC522's retained PowerDown bit
+  // stops its oscillator. Clearing that bit in beginNFCScan() wakes it
+  // quickly without a full hardware power-cycle.
   mfrc522.PCD_AntennaOff();
-  
-  // Manual Soft Power Down: Set the PowerDown bit (bit 4) in CommandReg (0x01)
-  // This drops the chip's current consumption to ~10uA
   mfrc522.PCD_SetRegisterBitMask(mfrc522.CommandReg, (1<<4));
 }
 

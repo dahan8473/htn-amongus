@@ -17,7 +17,6 @@ unsigned long lastPresence = 0;
 unsigned long lastProxDebug = 0;
 bool nfcEnabled = false;
 bool testMode = false;   // solo task-test harness (hold A at boot)
-bool immortal = false;
 
 void setup() {
   Serial.begin(115200);
@@ -43,11 +42,14 @@ void setup() {
   }
 
   setupTasks();
-  powerDownNFC();  // NFC starts off to save power
 
   if (!setupIMU()) {
     Serial.println("SC7A20 IMU not found at 0x19!");
   }
+
+  // Initialize NFC after Wire is configured, then leave it in low-power
+  // standby until AUX1 enables scanning.
+  setupNFC();
 }
 
 void loop() {
@@ -75,11 +77,19 @@ void loop() {
     }
   }
 
-  // NFC on during play AND lobby (lobby lets a single badge test tasks)
-  bool wantNfc = (gamePhase() == G_PLAYING || gamePhase() == G_LOBBY);
-  if (wantNfc != nfcEnabled) {
-    nfcEnabled = wantNfc;
-    if (nfcEnabled) beginNFCScan(); else powerDownNFC();
+  // AUX1 maintained switch controls the NFC reader for task stickers.
+  // Keep the reader in its low-power standby state when the switch is off;
+  // this retains the chip's supply/register state for a fast wake-up.
+  bool switchNfc = isButtonHeld(BTN_AUX1);
+  if (switchNfc != nfcEnabled) {
+    nfcEnabled = switchNfc;
+    if (nfcEnabled) {
+      beginNFCScan();
+      Serial.println("NFC ON");
+    } else {
+      powerDownNFC();
+      Serial.println("NFC OFF");
+    }
   }
   if (nfcEnabled) {
     String uid = scanNFC();
@@ -87,18 +97,6 @@ void loop() {
       Serial.print("Scanned tag UID: "); Serial.println(uid);
       gameOnNfc(uid.c_str());
     }
-  }
-
-  // AUX1 maintained switch: demo-mode immortality toggle. While ON, this
-  // badge can't be killed or even targeted, regardless of proximity to an
-  // imposter -- synced out so the host (which validates every kill) knows.
-  bool sw = isButtonHeld(BTN_AUX1);
-  if (sw != immortal) {
-    immortal = sw;
-    setImmortalId(myId(), immortal);
-    char m[16]; snprintf(m, sizeof(m), "IMM:%s:%d", myId(), immortal ? 1 : 0);
-    broadcastMessage(m);
-    Serial.println(immortal ? "IMMORTAL" : "MORTAL");
   }
 
   updateProximity();  // send the next ESP-NOW proximity beacon when due

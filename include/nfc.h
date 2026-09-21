@@ -1,11 +1,15 @@
 #pragma once
 #include <Arduino.h>
 
+// Initialize the reader once while leaving its antenna in low-power standby.
+void setupNFC();
+
 // Call this ONLY when the device is ready to accept a "task completion" scan
 void beginNFCScan();
 
 // Poll this in your main loop while scanning is active
 String scanNFC();
 
-// Call this to power down the MFRC522 immediately after a successful scan or timeout
+// Enter low-power standby without cutting reader power; registers are retained
+// so beginNFCScan() can wake it quickly.
 void powerDownNFC();

@@ -44,9 +44,3 @@ int meetingsIdx(int i);
 void incMeetingsId(const char *id);
 int aliveCount();
 int aliveRoleCount(int role);
-
-// Demo-mode immortality (AUX1 switch): an immortal player can't be killed or
-// even targeted, regardless of role or proximity. Persists across rounds
-// (it's a hardware switch state, not part of resetPlayerStates()).
-bool immortalIdx(int i);
-void setImmortalId(const char *id, bool immortal);
