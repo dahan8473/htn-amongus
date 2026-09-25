@@ -13,7 +13,7 @@ the game's state machine and broadcasting results to everyone else.
 [proximity killing](https://youtube.com/shorts/8PUTfQ83m04) ·
 [emergency meeting range test](https://youtube.com/shorts/_d-grZlzlpw)
 
-Built in 36 hours by [Lily Song](https://github.com/s-illly), [Yanzi Guo](https://github.com/yanziguo), and [David Liu](https://github.com/dahan8473).
+Built in 36 hours by [Lily Song](https://github.com/s-illly), [Yanzi Guo](https://github.com/yanziguoo), and [David Liu](https://github.com/dahan8473).
 
 ## Hardware
 
